@@ -78,12 +78,12 @@ jobs:
       - name: Run unit tests
         run: |
           set -o pipefail
-          DESTINATION_NAME=$(xcodebuild -project CHROMEX.xcodeproj -scheme "$SCHEME" -showdestinations 2>/dev/null \
-            | awk -F'name:' '/platform:iOS Simulator/ {print $2}' \
-            | sed 's/,.*//' | xargs | awk '{print $1" "$2" "$3}' | head -1)
+          DESTINATION_NAME="$(xcrun simctl list devices available \
+            | grep -E '^[[:space:]]+iPhone' \
+            | head -1 \
+            | sed -E 's/^[[:space:]]+//; s/ \(.*$//')"
           if [ -z "$DESTINATION_NAME" ]; then
-            echo "No iOS Simulator destination found" >&2
-            exit 1
+            DESTINATION_NAME="iPhone 16"
           fi
           echo "Testing on: $DESTINATION_NAME"
           xcodebuild test \
