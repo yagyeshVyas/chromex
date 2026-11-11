@@ -26,3 +26,8 @@ signing/
 # Local build logs (CI uploads these as artifacts)
 logs/
 *.log
+
+# SwiftPM
+.build/
+.swiftpm/
+dist/
