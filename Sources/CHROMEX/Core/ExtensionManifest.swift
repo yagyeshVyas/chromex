@@ -78,7 +78,14 @@ enum ManifestError: Error, LocalizedError, Equatable {
 
 enum ManifestParser {
     static func parse(data: Data) throws -> ExtensionManifest {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            // Surface a typed error, not a raw NSCocoaError from JSONSerialization.
+            throw ManifestError.notAJSONObject
+        }
+        guard let root = object as? [String: Any] else {
             throw ManifestError.notAJSONObject
         }
         guard let manifestVersion = root["manifest_version"] as? Int else {
