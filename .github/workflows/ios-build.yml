@@ -50,6 +50,17 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "marketing=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "marketing=1.0.0" >> "$GITHUB_OUTPUT"
+          fi
+          echo "build=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version: $(cat "$GITHUB_OUTPUT" | tr '\n' ' ')"
+
       - name: Show build settings (signing must be off)
         run: |
           xcodebuild -project CHROMEX.xcodeproj -scheme "$SCHEME" -showBuildSettings \
@@ -68,6 +79,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            MARKETING_VERSION="${{ steps.version.outputs.marketing }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build }}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
