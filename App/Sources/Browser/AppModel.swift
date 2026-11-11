@@ -240,39 +240,46 @@ final class AppModel: ObservableObject {
         scheduleSave()
 
         URLSession.shared.downloadTask(with: url) { temporaryURL, _, error in
-            let message = error?.localizedDescription
+            // URLSession deletes the temporary file when this handler returns, so the
+            // move has to happen here rather than after an actor hop.
+            var savedPath: String?
+            var failure = error?.localizedDescription
+
+            if let temporaryURL, failure == nil {
+                let fileManager = FileManager.default
+                let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let directory = documents.appendingPathComponent("Downloads", isDirectory: true)
+                try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+                let destination = directory.appendingPathComponent("\(UUID().uuidString.prefix(8))-\(filename)")
+                do {
+                    try fileManager.moveItem(at: temporaryURL, to: destination)
+                    savedPath = destination.path
+                } catch {
+                    failure = error.localizedDescription
+                }
+            }
+
+            let path = savedPath
+            let message = failure
             Task { @MainActor [weak self] in
-                self?.completeDownload(id: item.id, temporaryURL: temporaryURL, errorMessage: message)
+                self?.completeDownload(id: item.id, savedPath: path, errorMessage: message)
             }
         }.resume()
     }
 
-    private func completeDownload(id: UUID, temporaryURL: URL?, errorMessage: String?) {
+    private func completeDownload(id: UUID, savedPath: String?, errorMessage: String?) {
         guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
-        guard let temporaryURL, errorMessage == nil else {
+        guard let savedPath, errorMessage == nil else {
             downloads[index].state = .failed
             downloads[index].errorMessage = errorMessage ?? "The download could not be completed."
             scheduleSave()
             return
         }
 
-        let fileManager = FileManager.default
-        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let downloadsDirectory = documents.appendingPathComponent("Downloads", isDirectory: true)
-        try? fileManager.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
-
-        let unique = "\(UUID().uuidString.prefix(8))-\(downloads[index].filename)"
-        let destination = downloadsDirectory.appendingPathComponent(unique)
-        do {
-            try fileManager.moveItem(at: temporaryURL, to: destination)
-            let attributes = try? fileManager.attributesOfItem(atPath: destination.path)
-            downloads[index].byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
-            downloads[index].localPath = destination.path
-            downloads[index].state = .completed
-        } catch {
-            downloads[index].state = .failed
-            downloads[index].errorMessage = error.localizedDescription
-        }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: savedPath)
+        downloads[index].byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+        downloads[index].localPath = savedPath
+        downloads[index].state = .completed
         scheduleSave()
     }
 

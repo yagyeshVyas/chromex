@@ -87,10 +87,25 @@ struct TabSwitcherView: View {
         model.tabs.filter { $0.groupID == group.id }.count
     }
 
-    private func tabCard(_ tab: BrowserTab) -> some View {        Button {
-            model.select(tab)
-            dismiss()
-        } label: {
+    private func tabCard(_ tab: BrowserTab) -> some View {
+        cardBody(tab)
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .onTapGesture {
+                model.select(tab)
+                dismiss()
+            }
+            .contextMenu {
+                ForEach(model.groups) { group in
+                    Button("Move to \(group.name)") { tab.groupID = group.id }
+                }
+                if tab.groupID != nil {
+                    Button("Remove from group") { tab.groupID = nil }
+                }
+                Button("Close tab", role: .destructive) { model.closeTab(tab) }
+            }
+    }
+
+    private func cardBody(_ tab: BrowserTab) -> some View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text((tab.urlString.isEmpty ? "New Tab" : (URL(string: tab.urlString)?.host ?? "New Tab")))
@@ -143,19 +158,6 @@ struct TabSwitcherView: View {
                         lineWidth: tab.id == model.selectedTabID ? 1.2 : 0.5
                     )
             )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            ForEach(model.groups) { group in
-                Button("Move to \(group.name)") {
-                    tab.groupID = group.id
-                }
-            }
-            if tab.groupID != nil {
-                Button("Remove from group") { tab.groupID = nil }
-            }
-            Button("Close tab", role: .destructive) { model.closeTab(tab) }
-        }
     }
 
     private var newTabCard: some View {
