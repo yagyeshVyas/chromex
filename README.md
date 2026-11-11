@@ -31,7 +31,7 @@ shows the same list before every install.
 
 ## Install
 
-1. Download `CHROMEX-unsigned.ipa` from [Releases](../../releases) or the latest Actions run.
+1. Download `CHROMEX-unsigned.ipa` from [Releases](https://github.com/yagyeshVyas/chromex/releases) or the latest Actions run.
 2. Sign it with your own certificate and profile — see [SIGNING-GUIDE.md](SIGNING-GUIDE.md).
 3. Install the signed IPA and trust your developer certificate once.
 
