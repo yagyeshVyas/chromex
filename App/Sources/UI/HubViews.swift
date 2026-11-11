@@ -33,15 +33,12 @@ struct HubView: View {
         ZStack {
             BrowserBackground()
             if model.extensions.installed.isEmpty {
-                EmptyStateView(
-                    symbol: "puzzlepiece.extension",
-                    title: "No extensions yet",
-                    message: "Import a .zip, .crx or unpacked extension folder. CHROMEX inspects the package before anything runs.",
-                    actionTitle: "Import extension",
-                    action: { showingImporter = true }
-                )
+                emptyState
             } else {
                 extensionList
+            }
+            if isImporting {
+                importingOverlay
             }
         }
         .navigationTitle("Chromex Hub")
@@ -62,75 +59,102 @@ struct HubView: View {
             allowedContentTypes: allowedTypes,
             allowsMultipleSelection: false
         ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                beginImport(url)
-            case .failure(let error):
-                errorMessage = error.localizedDescription
-            }
+            handlePicker(result)
         }
         .sheet(item: $pending) { item in
             NavigationStack {
-                ImportReviewView(pending: item) { record in
+                ImportReviewView(pending: item) { _ in
                     pending = nil
-                    _ = record
                 }
             }
         }
-        .alert("Import failed", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
+        .alert("Import failed", isPresented: alertBinding) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
         }
-        .overlay {
-            if isImporting {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Inspecting package…")
-                        .font(ChromexFont.footnote)
-                        .foregroundStyle(ChromexColor.textSecondary)
-                }
-                .padding(24)
-                .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-        }
+    }
+
+    private var emptyState: some View {
+        EmptyStateView(
+            symbol: "puzzlepiece.extension",
+            title: "No extensions yet",
+            message: "Import a .zip, .crx or unpacked extension folder. CHROMEX inspects the package before anything runs.",
+            actionTitle: "Import extension",
+            action: { showingImporter = true }
+        )
     }
 
     private var extensionList: some View {
         List {
-            if !model.extensions.diagnostics.isEmpty {
-                Section {
-                    NavigationLink {
-                        DiagnosticsView()
-                    } label: {
-                        Label("Diagnostics", systemImage: "stethoscope")
-                    }
-                } header: {
-                    Text("Runtime")
-                }
-            }
-
-            Section {
-                ForEach(model.extensions.installed) { record in
-                    NavigationLink {
-                        ExtensionDetailView(record: record)
-                    } label: {
-                        ExtensionRow(record: record, storageBytes: model.extensions.storageByteCount(for: record))
-                    }
-                }
-            } header: {
-                SectionHeader(title: "Installed", trailing: "\(model.extensions.installed.count)")
-            } footer: {
-                Text("CHROMEX runs a documented subset of the Chrome extension APIs. Every extension is analysed before install and limitations are listed on its detail screen.")
-                    .font(ChromexFont.caption)
-            }
+            diagnosticsSection
+            installedSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder
+    private var diagnosticsSection: some View {
+        if !model.extensions.diagnostics.isEmpty {
+            Section {
+                NavigationLink {
+                    DiagnosticsView()
+                } label: {
+                    Label("Diagnostics", systemImage: "stethoscope")
+                }
+            } header: {
+                Text("Runtime")
+            }
+        }
+    }
+
+    private var installedSection: some View {
+        Section {
+            ForEach(model.extensions.installed) { record in
+                NavigationLink {
+                    ExtensionDetailView(record: record)
+                } label: {
+                    ExtensionRow(
+                        record: record,
+                        storageBytes: model.extensions.storageByteCount(for: record)
+                    )
+                }
+            }
+        } header: {
+            SectionHeader(title: "Installed", trailing: "\(model.extensions.installed.count)")
+        } footer: {
+            Text("CHROMEX runs a documented subset of the Chrome extension APIs. Every extension is analysed before install and limitations are listed on its detail screen.")
+                .font(ChromexFont.caption)
+        }
+    }
+
+    private var importingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Inspecting package…")
+                .font(ChromexFont.footnote)
+                .foregroundStyle(ChromexColor.textSecondary)
+        }
+        .padding(24)
+        .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var alertBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
+    }
+
+    private func handlePicker(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            beginImport(url)
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func beginImport(_ url: URL) {
@@ -162,18 +186,10 @@ struct ExtensionRow: View {
                     .font(ChromexFont.callout)
                     .foregroundStyle(ChromexColor.textPrimary)
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text("v\(record.version)")
-                    Text("·")
-                    Text(record.report.verdict.title)
-                    if storageBytes > 0 {
-                        Text("·")
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(storageBytes), countStyle: .file))
-                    }
-                }
-                .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textTertiary)
-                .lineLimit(1)
+                Text(subtitle)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+                    .lineLimit(1)
             }
             Spacer()
             Circle()
@@ -181,6 +197,14 @@ struct ExtensionRow: View {
                 .frame(width: 7, height: 7)
         }
         .padding(.vertical, 4)
+    }
+
+    private var subtitle: String {
+        var parts = ["v\(record.version)", record.report.verdict.title]
+        if storageBytes > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(storageBytes), countStyle: .file))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -197,6 +221,10 @@ struct ExtensionDetailView: View {
         model.extensions.installed.first { $0.id == record.id } ?? record
     }
 
+    private var hasPopup: Bool {
+        current.manifest?.action?.defaultPopup != nil
+    }
+
     var body: some View {
         ZStack {
             BrowserBackground()
@@ -204,10 +232,14 @@ struct ExtensionDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     identity
                     verdictCard
-                    if !current.report.findings.isEmpty { limitations }
+                    if !current.report.findings.isEmpty {
+                        limitations
+                    }
                     permissionsCard
                     detailsCard
-                    if hasPopup { popupButton }
+                    if hasPopup {
+                        popupButton
+                    }
                     removeButton
                 }
                 .padding(20)
@@ -215,7 +247,11 @@ struct ExtensionDetailView: View {
         }
         .navigationTitle(current.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Remove \(current.displayName)?", isPresented: $showingRemove, titleVisibility: .visible) {
+        .confirmationDialog(
+            "Remove \(current.displayName)?",
+            isPresented: $showingRemove,
+            titleVisibility: .visible
+        ) {
             Button("Remove extension", role: .destructive) {
                 model.extensions.remove(current)
                 dismiss()
@@ -224,10 +260,6 @@ struct ExtensionDetailView: View {
         } message: {
             Text("Its package, storage and grants are deleted from this device.")
         }
-    }
-
-    private var hasPopup: Bool {
-        current.manifest?.action?.defaultPopup != nil
     }
 
     private var identity: some View {
@@ -246,7 +278,7 @@ struct ExtensionDetailView: View {
                 Text("v\(current.version) · Manifest V\(current.manifest?.manifestVersion ?? 3)")
                     .font(ChromexFont.caption)
                     .foregroundStyle(ChromexColor.textTertiary)
-                Text(current.signatureVerified ? "CRX signature verified" : "\(current.sourceKind.uppercased()) · signature not verified")
+                Text(signatureLine)
                     .font(ChromexFont.caption)
                     .foregroundStyle(current.signatureVerified ? ChromexColor.success : ChromexColor.textTertiary)
             }
@@ -254,17 +286,20 @@ struct ExtensionDetailView: View {
         }
     }
 
+    private var signatureLine: String {
+        current.signatureVerified
+            ? "CRX signature verified"
+            : "\(current.sourceKind.uppercased()) · signature not verified"
+    }
+
     private var verdictCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VerdictBadge(verdict: current.report.verdict)
                 Spacer()
-                Toggle("", isOn: Binding(
-                    get: { current.isEnabled },
-                    set: { model.extensions.setEnabled(current, $0) }
-                ))
-                .labelsHidden()
-                .tint(ChromexColor.electricBlue)
+                Toggle("", isOn: enabledBinding)
+                    .labelsHidden()
+                    .tint(ChromexColor.electricBlue)
             }
             Text(current.report.verdict.explanation)
                 .font(ChromexFont.footnote)
@@ -278,27 +313,38 @@ struct ExtensionDetailView: View {
         .cardStyle()
     }
 
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { current.isEnabled },
+            set: { model.extensions.setEnabled(current, $0) }
+        )
+    }
+
     private var limitations: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "Not available on iOS")
             ForEach(current.report.findings) { finding in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: finding.status == .refused ? "hand.raised.fill" : "minus.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(finding.status == .refused ? ChromexColor.danger : ChromexColor.warning)
-                        .padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(finding.api)
-                            .font(ChromexFont.callout)
-                            .foregroundStyle(ChromexColor.textPrimary)
-                        Text(finding.message)
-                            .font(ChromexFont.caption)
-                            .foregroundStyle(ChromexColor.textSecondary)
-                    }
-                }
+                findingRow(finding)
             }
         }
         .cardStyle()
+    }
+
+    private func findingRow(_ finding: CompatibilityFinding) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: finding.status == .refused ? "hand.raised.fill" : "minus.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(finding.status == .refused ? ChromexColor.danger : ChromexColor.warning)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finding.api)
+                    .font(ChromexFont.callout)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                Text(finding.message)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textSecondary)
+            }
+        }
     }
 
     private var permissionsCard: some View {
@@ -310,19 +356,23 @@ struct ExtensionDetailView: View {
                     .foregroundStyle(ChromexColor.textSecondary)
             } else {
                 ForEach(current.grants, id: \.self) { grant in
-                    HStack(spacing: 8) {
-                        Image(systemName: grant == "<all_urls>" ? "exclamationmark.shield.fill" : "checkmark.shield")
-                            .font(.system(size: 12))
-                            .foregroundStyle(grant == "<all_urls>" ? ChromexColor.warning : ChromexColor.textSecondary)
-                        Text(grant)
-                            .font(ChromexFont.mono)
-                            .foregroundStyle(ChromexColor.textSecondary)
-                        Spacer()
-                    }
+                    grantRow(grant)
                 }
             }
         }
         .cardStyle()
+    }
+
+    private func grantRow(_ grant: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: grant == "<all_urls>" ? "exclamationmark.shield.fill" : "checkmark.shield")
+                .font(.system(size: 12))
+                .foregroundStyle(grant == "<all_urls>" ? ChromexColor.warning : ChromexColor.textSecondary)
+            Text(grant)
+                .font(ChromexFont.mono)
+                .foregroundStyle(ChromexColor.textSecondary)
+            Spacer()
+        }
     }
 
     private var detailsCard: some View {
@@ -404,89 +454,11 @@ struct ImportReviewView: View {
             BrowserBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack(spacing: 12) {
-                        DiamondMark(size: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(manifest.name)
-                                .font(ChromexFont.title)
-                                .foregroundStyle(ChromexColor.textPrimary)
-                            Text("v\(manifest.version) · Manifest V\(manifest.manifestVersion) · \(pending.package.sourceKind.rawValue.uppercased())")
-                                .font(ChromexFont.caption)
-                                .foregroundStyle(ChromexColor.textTertiary)
-                        }
-                        Spacer()
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        VerdictBadge(verdict: report.verdict)
-                        Text(report.verdict.explanation)
-                            .font(ChromexFont.footnote)
-                            .foregroundStyle(ChromexColor.textSecondary)
-                    }
-                    .cardStyle()
-
-                    if !report.findings.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            SectionHeader(title: "Will not work")
-                            ForEach(report.findings) { finding in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "minus.circle")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(ChromexColor.warning)
-                                        .padding(.top, 2)
-                                    Text("\(finding.api) — \(finding.message)")
-                                        .font(ChromexFont.caption)
-                                        .foregroundStyle(ChromexColor.textSecondary)
-                                }
-                            }
-                        }
-                        .cardStyle()
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "Allow access")
-                        if pending.grants.isEmpty {
-                            Text("This extension requests no host access.")
-                                .font(ChromexFont.footnote)
-                                .foregroundStyle(ChromexColor.textSecondary)
-                        } else {
-                            ForEach(pending.grants, id: \.self) { grant in
-                                Toggle(isOn: Binding(
-                                    get: { grants.contains(grant) },
-                                    set: { enabled in
-                                        if enabled { grants.insert(grant) } else { grants.remove(grant) }
-                                    }
-                                )) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(grant == "<all_urls>" ? "All websites" : grant)
-                                            .font(ChromexFont.callout)
-                                            .foregroundStyle(ChromexColor.textPrimary)
-                                        Text(grant == "<all_urls>" ? "Read and change data on every site you visit" : "Read and change data on matching sites")
-                                            .font(ChromexFont.caption)
-                                            .foregroundStyle(ChromexColor.textTertiary)
-                                    }
-                                }
-                                .tint(ChromexColor.electricBlue)
-                            }
-                        }
-                    }
-                    .cardStyle()
-
-                    Text("Nothing has run yet. Installing adds the package to this device; content scripts only run on sites you allowed.")
-                        .font(ChromexFont.caption)
-                        .foregroundStyle(ChromexColor.textTertiary)
-
-                    Button {
-                        install()
-                    } label: {
-                        if isInstalling {
-                            ProgressView().tint(.white)
-                        } else {
-                            Text(report.verdict == .refused ? "Install anyway" : "Install extension")
-                        }
-                    }
-                    .buttonStyle(PrimaryButtonStyle(fill: report.verdict == .refused ? ChromexColor.textTertiary : ChromexColor.electricBlue))
-                    .disabled(isInstalling)
+                    headerBlock
+                    verdictBlock
+                    limitsBlock
+                    grantsBlock
+                    installBlock
                 }
                 .padding(20)
             }
@@ -498,17 +470,144 @@ struct ImportReviewView: View {
                 Button("Cancel") { dismiss() }
             }
         }
-        .onAppear {
-            grants = Set(pending.grants)
-        }
-        .alert("Install failed", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
+        .onAppear { grants = Set(pending.grants) }
+        .alert("Install failed", isPresented: alertBinding) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private var headerBlock: some View {
+        HStack(spacing: 12) {
+            DiamondMark(size: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(manifest.name)
+                    .font(ChromexFont.title)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                Text(headerSubtitle)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+            }
+            Spacer()
+        }
+    }
+
+    private var headerSubtitle: String {
+        "v\(manifest.version) · Manifest V\(manifest.manifestVersion) · \(pending.package.sourceKind.rawValue.uppercased())"
+    }
+
+    private var verdictBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VerdictBadge(verdict: report.verdict)
+            Text(report.verdict.explanation)
+                .font(ChromexFont.footnote)
+                .foregroundStyle(ChromexColor.textSecondary)
+        }
+        .cardStyle()
+    }
+
+    @ViewBuilder
+    private var limitsBlock: some View {
+        if !report.findings.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(title: "Will not work")
+                ForEach(report.findings) { finding in
+                    limitRow(finding)
+                }
+            }
+            .cardStyle()
+        }
+    }
+
+    private func limitRow(_ finding: CompatibilityFinding) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "minus.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(ChromexColor.warning)
+                .padding(.top, 2)
+            Text("\(finding.api) — \(finding.message)")
+                .font(ChromexFont.caption)
+                .foregroundStyle(ChromexColor.textSecondary)
+        }
+    }
+
+    private var grantsBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Allow access")
+            if pending.grants.isEmpty {
+                Text("This extension requests no host access.")
+                    .font(ChromexFont.footnote)
+                    .foregroundStyle(ChromexColor.textSecondary)
+            } else {
+                ForEach(pending.grants, id: \.self) { grant in
+                    grantToggle(grant)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func grantToggle(_ grant: String) -> some View {
+        Toggle(isOn: binding(for: grant)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(grant == "<all_urls>" ? "All websites" : grant)
+                    .font(ChromexFont.callout)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                Text(grant == "<all_urls>" ? "Read and change data on every site you visit" : "Read and change data on matching sites")
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+            }
+        }
+        .tint(ChromexColor.electricBlue)
+    }
+
+    private func binding(for grant: String) -> Binding<Bool> {
+        Binding(
+            get: { grants.contains(grant) },
+            set: { enabled in
+                if enabled {
+                    grants.insert(grant)
+                } else {
+                    grants.remove(grant)
+                }
+            }
+        )
+    }
+
+    private var installBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Nothing has run yet. Installing adds the package to this device; content scripts only run on sites you allowed.")
+                .font(ChromexFont.caption)
+                .foregroundStyle(ChromexColor.textTertiary)
+            Button {
+                install()
+            } label: {
+                installLabel
+            }
+            .buttonStyle(PrimaryButtonStyle(fill: installTint))
+            .disabled(isInstalling)
+        }
+    }
+
+    @ViewBuilder
+    private var installLabel: some View {
+        if isInstalling {
+            ProgressView().tint(.white)
+        } else {
+            Text(report.verdict == .refused ? "Install anyway" : "Install extension")
+        }
+    }
+
+    private var installTint: Color {
+        report.verdict == .refused ? ChromexColor.textTertiary : ChromexColor.electricBlue
+    }
+
+    private var alertBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
     }
 
     private func install() {
@@ -537,22 +636,7 @@ struct ExtensionPopupView: View {
         ZStack {
             BrowserBackground()
             VStack(spacing: 0) {
-                HStack {
-                    DiamondMark(size: 16)
-                    Text(record.displayName)
-                        .font(ChromexFont.headline)
-                        .foregroundStyle(ChromexColor.textPrimary)
-                    Spacer()
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(ChromexColor.textTertiary)
-                    }
-                    .accessibilityLabel("Close popup")
-                }
-                .padding(16)
-
+                popupHeader
                 if let webView {
                     WebViewContainer(webView: webView)
                 } else {
@@ -571,6 +655,24 @@ struct ExtensionPopupView: View {
             }
         }
     }
+
+    private var popupHeader: some View {
+        HStack {
+            DiamondMark(size: 16)
+            Text(record.displayName)
+                .font(ChromexFont.headline)
+                .foregroundStyle(ChromexColor.textPrimary)
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(ChromexColor.textTertiary)
+            }
+            .accessibilityLabel("Close popup")
+        }
+        .padding(16)
+    }
 }
 
 // MARK: - Diagnostics
@@ -588,17 +690,7 @@ struct DiagnosticsView: View {
                     message: "Errors reported by extension background pages appear here."
                 )
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(model.extensions.diagnostics.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(ChromexFont.mono)
-                                .foregroundStyle(ChromexColor.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(20)
-                }
+                diagnosticList
             }
         }
         .navigationTitle("Diagnostics")
@@ -607,6 +699,20 @@ struct DiagnosticsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Clear") { model.extensions.clearDiagnostics() }
             }
+        }
+    }
+
+    private var diagnosticList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(model.extensions.diagnostics.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(ChromexFont.mono)
+                        .foregroundStyle(ChromexColor.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(20)
         }
     }
 }

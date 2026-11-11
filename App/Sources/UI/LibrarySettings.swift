@@ -16,41 +16,7 @@ struct BookmarksView: View {
                     message: "Add a bookmark from the page menu while browsing."
                 )
             } else {
-                List {
-                    ForEach(model.bookmarks) { bookmark in
-                        Button {
-                            if let url = URL(string: bookmark.urlString) {
-                                model.openTab(url: url, select: true)
-                                dismiss()
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "bookmark.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(ChromexColor.electricBlue)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(bookmark.title)
-                                        .font(ChromexFont.callout)
-                                        .foregroundStyle(ChromexColor.textPrimary)
-                                        .lineLimit(1)
-                                    Text(bookmark.urlString)
-                                        .font(ChromexFont.caption)
-                                        .foregroundStyle(ChromexColor.textTertiary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            Button("Delete", role: .destructive) {
-                                model.removeBookmark(bookmark)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                bookmarkList
             }
         }
         .navigationTitle("Bookmarks")
@@ -60,6 +26,49 @@ struct BookmarksView: View {
                 Button("Done") { dismiss() }
             }
         }
+    }
+
+    private var bookmarkList: some View {
+        List {
+            ForEach(model.bookmarks) { bookmark in
+                Button {
+                    open(bookmark)
+                } label: {
+                    bookmarkRow(bookmark)
+                }
+                .buttonStyle(.plain)
+                .swipeActions {
+                    Button("Delete", role: .destructive) { model.removeBookmark(bookmark) }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func bookmarkRow(_ bookmark: Bookmark) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bookmark.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(ChromexColor.electricBlue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bookmark.title)
+                    .font(ChromexFont.callout)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                    .lineLimit(1)
+                Text(bookmark.urlString)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+    }
+
+    private func open(_ bookmark: Bookmark) {
+        guard let url = URL(string: bookmark.urlString) else { return }
+        model.openTab(url: url, select: true)
+        dismiss()
     }
 }
 
@@ -88,41 +97,7 @@ struct HistoryView: View {
                     message: "Pages you visit appear here. Private browsing is never recorded."
                 )
             } else {
-                List {
-                    ForEach(filtered) { entry in
-                        Button {
-                            if let url = URL(string: entry.urlString) {
-                                model.openTab(url: url, select: true)
-                                dismiss()
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text(entry.visitedAt, format: .dateTime.hour().minute())
-                                    .font(ChromexFont.caption)
-                                    .foregroundStyle(ChromexColor.textTertiary)
-                                    .frame(width: 52, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.title)
-                                        .font(ChromexFont.callout)
-                                        .foregroundStyle(ChromexColor.textPrimary)
-                                        .lineLimit(1)
-                                    Text(entry.host)
-                                        .font(ChromexFont.caption)
-                                        .foregroundStyle(ChromexColor.textTertiary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { model.deleteHistory(entry) }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+                historyList
             }
         }
         .navigationTitle("History")
@@ -136,6 +111,51 @@ struct HistoryView: View {
                 Button("Done") { dismiss() }
             }
         }
+    }
+
+    private var historyList: some View {
+        List {
+            ForEach(filtered) { entry in
+                Button {
+                    open(entry)
+                } label: {
+                    historyRow(entry)
+                }
+                .buttonStyle(.plain)
+                .swipeActions {
+                    Button("Delete", role: .destructive) { model.deleteHistory(entry) }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+    }
+
+    private func historyRow(_ entry: HistoryEntry) -> some View {
+        HStack(spacing: 12) {
+            Text(entry.visitedAt, format: .dateTime.hour().minute())
+                .font(ChromexFont.caption)
+                .foregroundStyle(ChromexColor.textTertiary)
+                .frame(width: 52, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.title)
+                    .font(ChromexFont.callout)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                    .lineLimit(1)
+                Text(entry.host)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+    }
+
+    private func open(_ entry: HistoryEntry) {
+        guard let url = URL(string: entry.urlString) else { return }
+        model.openTab(url: url, select: true)
+        dismiss()
     }
 }
 
@@ -156,41 +176,7 @@ struct DownloadsView: View {
                     message: "Files you download are saved in CHROMEX/Documents/Downloads and reachable from the Files app."
                 )
             } else {
-                List {
-                    ForEach(model.downloads) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: icon(for: item))
-                                .font(.system(size: 16))
-                                .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textSecondary)
-                                .frame(width: 26)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.filename)
-                                    .font(ChromexFont.callout)
-                                    .foregroundStyle(ChromexColor.textPrimary)
-                                    .lineLimit(1)
-                                Text(subtitle(for: item))
-                                    .font(ChromexFont.caption)
-                                    .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textTertiary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if item.state == .completed, let path = item.localPath {
-                                Button {
-                                    shareItem = ShareItem(url: URL(fileURLWithPath: path))
-                                } label: {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .foregroundStyle(ChromexColor.electricBlue)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .swipeActions {
-                            Button("Remove", role: .destructive) { model.removeDownload(item) }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                downloadList
             }
         }
         .navigationTitle("Downloads")
@@ -203,6 +189,48 @@ struct DownloadsView: View {
         .sheet(item: $shareItem) { item in
             ActivityView(activityItems: [item.url])
                 .presentationDetents([.medium])
+        }
+    }
+
+    private var downloadList: some View {
+        List {
+            ForEach(model.downloads) { item in
+                downloadRow(item)
+                    .swipeActions {
+                        Button("Remove", role: .destructive) { model.removeDownload(item) }
+                    }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func downloadRow(_ item: DownloadItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: item))
+                .font(.system(size: 16))
+                .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textSecondary)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.filename)
+                    .font(ChromexFont.callout)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                    .lineLimit(1)
+                Text(subtitle(for: item))
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if item.state == .completed, let path = item.localPath {
+                Button {
+                    shareItem = ShareItem(url: URL(fileURLWithPath: path))
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundStyle(ChromexColor.electricBlue)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -240,120 +268,12 @@ struct SettingsView: View {
         ZStack {
             BrowserBackground()
             Form {
-                Section {
-                    Picker("Search engine", selection: Binding(
-                        get: { model.preferences.searchEngineID },
-                        set: { model.preferences.searchEngineID = $0 }
-                    )) {
-                        ForEach(model.allSearchEngines) { engine in
-                            Text(engine.name).tag(engine.id)
-                        }
-                    }
-                    HStack {
-                        Text("Homepage")
-                        Spacer()
-                        TextField("Start page", text: Binding(
-                            get: { model.preferences.homepage },
-                            set: { model.preferences.homepage = $0 }
-                        ))
-                        .multilineTextAlignment(.trailing)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    }
-                } header: {
-                    Text("Browsing")
-                }
-
-                Section {
-                    Picker("Appearance", selection: Binding(
-                        get: { model.preferences.theme },
-                        set: { model.preferences.theme = $0 }
-                    )) {
-                        ForEach(AppTheme.allCases, id: \.self) { theme in
-                            Text(theme.displayName).tag(theme)
-                        }
-                    }
-                    Toggle("Desktop site by default", isOn: Binding(
-                        get: { model.preferences.desktopModeByDefault },
-                        set: { model.preferences.desktopModeByDefault = $0 }
-                    ))
-                    .tint(ChromexColor.electricBlue)
-                } header: {
-                    Text("Display")
-                }
-
-                Section {
-                    Toggle("Block ads and trackers", isOn: Binding(
-                        get: { model.preferences.blockAdsAndTrackers },
-                        set: { model.preferences.blockAdsAndTrackers = $0 }
-                    ))
-                    .tint(ChromexColor.electricBlue)
-                    NavigationLink("Privacy dashboard") { PrivacyDashboardView() }
-                } header: {
-                    Text("Privacy")
-                } footer: {
-                    Text("Blocking is declarative. WebKit does not expose per-request interception to browsers, so CHROMEX ships a compiled rule list instead of pretending to filter traffic.")
-                }
-
-                Section {
-                    ForEach(model.customEngines) { engine in
-                        HStack {
-                            Text(engine.name)
-                            Spacer()
-                            Text(engine.template)
-                                .font(ChromexFont.caption)
-                                .foregroundStyle(ChromexColor.textTertiary)
-                                .lineLimit(1)
-                        }
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { model.removeSearchEngine(engine) }
-                        }
-                    }
-                    Button("Add search engine") {
-                        engineName = ""
-                        engineTemplate = ""
-                        showingNewEngine = true
-                    }
-                } header: {
-                    Text("Custom search engines")
-                } footer: {
-                    Text("Use %s where the query goes, for example https://example.com/search?q=%s")
-                }
-
-                Section {
-                    Button("Clear history", role: .destructive) { model.clearHistory() }
-                    Button("Clear downloads list", role: .destructive) {
-                        for item in model.downloads { model.removeDownload(item) }
-                    }
-                } header: {
-                    Text("Data")
-                }
-
-                Section {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(ChromexColor.textTertiary)
-                    }
-                    HStack {
-                        Text("Engine")
-                        Spacer()
-                        Text("WebKit / WKWebView")
-                            .foregroundStyle(ChromexColor.textTertiary)
-                    }
-                    HStack {
-                        Text("Extensions")
-                        Spacer()
-                        Text("\(model.extensions.installed.count) installed")
-                            .foregroundStyle(ChromexColor.textTertiary)
-                    }
-                } header: {
-                    Text("About CHROMEX")
-                } footer: {
-                    Text("Your Browser. Your Extensions. Your Rules.")
-                }
+                browsingSection
+                displaySection
+                privacySection
+                enginesSection
+                dataSection
+                aboutSection
             }
             .scrollContentBackground(.hidden)
         }
@@ -370,14 +290,157 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             Button("Cancel", role: .cancel) {}
-            Button("Add") {
-                let name = engineName.trimmingCharacters(in: .whitespaces)
-                let template = engineTemplate.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty, template.contains("%s") {
-                    model.addSearchEngine(name: name, template: template)
+            Button("Add") { addEngine() }
+        }
+    }
+
+    private var browsingSection: some View {
+        Section {
+            Picker("Search engine", selection: searchEngineBinding) {
+                ForEach(model.allSearchEngines) { engine in
+                    Text(engine.name).tag(engine.id)
                 }
             }
+            HStack {
+                Text("Homepage")
+                Spacer()
+                TextField("Start page", text: homepageBinding)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+            }
+        } header: {
+            Text("Browsing")
         }
+    }
+
+    private var displaySection: some View {
+        Section {
+            Picker("Appearance", selection: themeBinding) {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    Text(theme.displayName).tag(theme)
+                }
+            }
+            Toggle("Desktop site by default", isOn: desktopBinding)
+                .tint(ChromexColor.electricBlue)
+        } header: {
+            Text("Display")
+        }
+    }
+
+    private var privacySection: some View {
+        Section {
+            Toggle("Block ads and trackers", isOn: blockingBinding)
+                .tint(ChromexColor.electricBlue)
+            NavigationLink("Privacy dashboard") { PrivacyDashboardView() }
+        } header: {
+            Text("Privacy")
+        } footer: {
+            Text("Blocking is declarative. WebKit does not expose per-request interception to browsers, so CHROMEX ships a compiled rule list instead of pretending to filter traffic.")
+        }
+    }
+
+    private var enginesSection: some View {
+        Section {
+            ForEach(model.customEngines) { engine in
+                HStack {
+                    Text(engine.name)
+                    Spacer()
+                    Text(engine.template)
+                        .font(ChromexFont.caption)
+                        .foregroundStyle(ChromexColor.textTertiary)
+                        .lineLimit(1)
+                }
+                .swipeActions {
+                    Button("Delete", role: .destructive) { model.removeSearchEngine(engine) }
+                }
+            }
+            Button("Add search engine") {
+                engineName = ""
+                engineTemplate = ""
+                showingNewEngine = true
+            }
+        } header: {
+            Text("Custom search engines")
+        } footer: {
+            Text("Use %s where the query goes, for example https://example.com/search?q=%s")
+        }
+    }
+
+    private var dataSection: some View {
+        Section {
+            Button("Clear history", role: .destructive) { model.clearHistory() }
+            Button("Clear downloads list", role: .destructive) {
+                for item in model.downloads { model.removeDownload(item) }
+            }
+        } header: {
+            Text("Data")
+        }
+    }
+
+    private var aboutSection: some View {
+        Section {
+            aboutRow("Version", "1.0.0")
+            aboutRow("Engine", "WebKit / WKWebView")
+            aboutRow("Extensions", "\(model.extensions.installed.count) installed")
+        } header: {
+            Text("About CHROMEX")
+        } footer: {
+            Text("Your Browser. Your Extensions. Your Rules.")
+        }
+    }
+
+    private func aboutRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).foregroundStyle(ChromexColor.textTertiary)
+        }
+    }
+
+    private var searchEngineBinding: Binding<UUID> {
+        Binding(
+            get: { model.preferences.searchEngineID },
+            set: { model.preferences.searchEngineID = $0 }
+        )
+    }
+
+    private var homepageBinding: Binding<String> {
+        Binding(
+            get: { model.preferences.homepage },
+            set: { model.preferences.homepage = $0 }
+        )
+    }
+
+    private var themeBinding: Binding<AppTheme> {
+        Binding(
+            get: { model.preferences.theme },
+            set: { model.preferences.theme = $0 }
+        )
+    }
+
+    private var desktopBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.desktopModeByDefault },
+            set: { model.preferences.desktopModeByDefault = $0 }
+        )
+    }
+
+    private var blockingBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.blockAdsAndTrackers },
+            set: { model.preferences.blockAdsAndTrackers = $0 }
+        )
+    }
+
+    private func addEngine() {
+        let name = engineName.trimmingCharacters(in: .whitespaces)
+        let template = engineTemplate.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, template.contains("%s") else { return }
+        model.addSearchEngine(name: name, template: template)
+        engineName = ""
+        engineTemplate = ""
     }
 }
 
@@ -447,24 +510,32 @@ struct PrivacyDashboardView: View {
                     .font(ChromexFont.footnote)
                     .foregroundStyle(ChromexColor.textSecondary)
             } else {
-                ForEach(model.permissions.sorted { $0.decidedAt > $1.decidedAt }.prefix(12)) { permission in
-                    HStack(spacing: 8) {
-                        Text(permission.host)
-                            .font(ChromexFont.callout)
-                            .foregroundStyle(ChromexColor.textPrimary)
-                            .lineLimit(1)
-                        Text(permission.type.displayName)
-                            .font(ChromexFont.caption)
-                            .foregroundStyle(ChromexColor.textTertiary)
-                        Spacer()
-                        Text(permission.decision.rawValue.capitalized)
-                            .font(ChromexFont.caption)
-                            .foregroundStyle(permission.decision == .allow ? ChromexColor.success : ChromexColor.danger)
-                    }
+                ForEach(sortedPermissions) { permission in
+                    permissionRow(permission)
                 }
             }
         }
         .cardStyle()
+    }
+
+    private var sortedPermissions: [SitePermission] {
+        Array(model.permissions.sorted { $0.decidedAt > $1.decidedAt }.prefix(12))
+    }
+
+    private func permissionRow(_ permission: SitePermission) -> some View {
+        HStack(spacing: 8) {
+            Text(permission.host)
+                .font(ChromexFont.callout)
+                .foregroundStyle(ChromexColor.textPrimary)
+                .lineLimit(1)
+            Text(permission.type.displayName)
+                .font(ChromexFont.caption)
+                .foregroundStyle(ChromexColor.textTertiary)
+            Spacer()
+            Text(permission.decision == .allow ? "Allowed" : "Denied")
+                .font(ChromexFont.caption)
+                .foregroundStyle(permission.decision == .allow ? ChromexColor.success : ChromexColor.danger)
+        }
     }
 
     private var extensionCard: some View {
@@ -476,21 +547,25 @@ struct PrivacyDashboardView: View {
                     .foregroundStyle(ChromexColor.textSecondary)
             } else {
                 ForEach(model.extensions.installed) { record in
-                    HStack(spacing: 8) {
-                        DiamondMark(size: 12)
-                        Text(record.displayName)
-                            .font(ChromexFont.callout)
-                            .foregroundStyle(ChromexColor.textPrimary)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(accessSummary(record))
-                            .font(ChromexFont.caption)
-                            .foregroundStyle(ChromexColor.textTertiary)
-                    }
+                    extensionRow(record)
                 }
             }
         }
         .cardStyle()
+    }
+
+    private func extensionRow(_ record: InstalledExtension) -> some View {
+        HStack(spacing: 8) {
+            DiamondMark(size: 12)
+            Text(record.displayName)
+                .font(ChromexFont.callout)
+                .foregroundStyle(ChromexColor.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            Text(accessSummary(record))
+                .font(ChromexFont.caption)
+                .foregroundStyle(ChromexColor.textTertiary)
+        }
     }
 
     private func accessSummary(_ record: InstalledExtension) -> String {

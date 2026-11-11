@@ -66,11 +66,10 @@ struct TabSwitcherView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(model.groups) { group in
-                        let count = model.tabs.filter { $0.groupID == group.id }.count
                         HStack(spacing: 6) {
                             Circle().fill(ChromexColor.violet).frame(width: 7, height: 7)
                             Text(group.name).font(ChromexFont.footnote)
-                            Text("\(count)").font(ChromexFont.caption).foregroundStyle(ChromexColor.textTertiary)
+                            Text("\(groupCount(group))").font(ChromexFont.caption).foregroundStyle(ChromexColor.textTertiary)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -84,8 +83,11 @@ struct TabSwitcherView: View {
         }
     }
 
-    private func tabCard(_ tab: BrowserTab) -> some View {
-        Button {
+    private func groupCount(_ group: TabGroup) -> Int {
+        model.tabs.filter { $0.groupID == group.id }.count
+    }
+
+    private func tabCard(_ tab: BrowserTab) -> some View {        Button {
             model.select(tab)
             dismiss()
         } label: {

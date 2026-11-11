@@ -88,16 +88,27 @@ final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler
             return
         }
 
+        var headers: [String: String] = [
+            "Content-Type": Self.mimeType(for: fileURL.pathExtension),
+            "Content-Length": String(data.count),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff"
+        ]
+        if fileURL.pathExtension.lowercased() == "html" || fileURL.pathExtension.lowercased() == "htm" {
+            // Remote script is refused; packaged resources are the only scripts.
+            headers["Content-Security-Policy"] =
+                "default-src 'self' chromex-extension: data: blob:; " +
+                "script-src 'self' chromex-extension:; " +
+                "style-src 'self' 'unsafe-inline' chromex-extension:; " +
+                "img-src 'self' chromex-extension: data: blob:; " +
+                "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        }
+
         let response = HTTPURLResponse(
             url: url,
             statusCode: 200,
             httpVersion: "HTTP/1.1",
-            headerFields: [
-                "Content-Type": Self.mimeType(for: fileURL.pathExtension),
-                "Content-Length": String(data.count),
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff"
-            ]
+            headerFields: headers
         )
         if let response { urlSchemeTask.didReceive(response) }
         urlSchemeTask.didReceive(data)
