@@ -112,7 +112,7 @@ final class ExtensionFixtureTests: XCTestCase {
 
     func testMalformedManifestIsRejected() {
         XCTAssertThrowsError(try ExtensionPackage.stage(from: try fixture("malformed"))) { error in
-            guard case ManifestError.notAJSONObject = error else {
+            guard let manifestError = error as? ManifestError, manifestError == .notAJSONObject else {
                 return XCTFail("expected notAJSONObject, got \(error)")
             }
         }
@@ -126,7 +126,7 @@ final class ExtensionFixtureTests: XCTestCase {
 
     func testPathTraversalArchiveIsRejected() {
         XCTAssertThrowsError(try ExtensionPackage.stage(from: try fixture("malicious-traversal"))) { error in
-            guard case PackageError.pathTraversal = error else {
+            guard let packageError = error as? PackageError, case .pathTraversal = packageError else {
                 return XCTFail("expected pathTraversal, got \(error)")
             }
         }
