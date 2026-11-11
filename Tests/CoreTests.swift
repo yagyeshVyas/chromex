@@ -204,7 +204,7 @@ final class ManifestTests: XCTestCase {
             icons: [:],
             contentSecurityPolicy: nil
         )
-        let grants = InstalledExtension.requestedGrants(for: manifest)
+        let grants = manifest.requestedHostPatterns
         XCTAssertEqual(grants, ["https://a.com/*", "https://b.com/*"])
     }
 }

@@ -21,11 +21,7 @@ struct InstalledExtension: Identifiable, Codable, Sendable, Hashable {
 
     /// Host patterns the user consented to: declared hosts plus content-script matches.
     static func requestedGrants(for manifest: ExtensionManifest) -> [String] {
-        var patterns = manifest.hostPermissions
-        for script in manifest.contentScripts {
-            patterns.append(contentsOf: script.matches)
-        }
-        return Array(Set(patterns)).sorted()
+        manifest.requestedHostPatterns
     }
 }
 

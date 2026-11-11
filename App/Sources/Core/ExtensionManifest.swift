@@ -192,8 +192,19 @@ enum ManifestParser {
     }
 }
 
-// MARK: - Host matching
+extension ExtensionManifest {
+    /// Host patterns the user must consent to: declared hosts plus content-script
+    /// matches, deduplicated and sorted for stable presentation.
+    var requestedHostPatterns: [String] {
+        var patterns = hostPermissions
+        for script in contentScripts {
+            patterns.append(contentsOf: script.matches)
+        }
+        return Array(Set(patterns)).sorted()
+    }
+}
 
+// MARK: - Host matching
 enum HostMatcher {
     static func isHostPattern(_ value: String) -> Bool {
         if value == "<all_urls>" { return true }
