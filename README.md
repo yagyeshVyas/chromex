@@ -1,4 +1,4 @@
-﻿# CHROMEX
+# CHROMEX
 
 **Your Browser. Your Extensions. Your Rules.**
 
@@ -39,18 +39,24 @@ The unsigned file itself will not launch. That is expected; it has no signature 
 
 ---
 
-## Build it yourself
+## Build it yourself (xtool, Windows + WSL2)
 
-Everything runs on GitHub's macOS runners. No Mac, no local Xcode.
+CHROMEX is an xtool SwiftPM project. There is no `.xcodeproj` to open and no Mac required.
 
 ```bash
-gh workflow run ios-build.yml
-gh run download --name CHROMEX-unsigned-ipa
+# inside WSL2, from the repository root
+bash Scripts/xtool-check.sh      # validates Swift, xtool and the Darwin SDK
+xtool dev build -c release --ipa # builds the app and emits an unsigned IPA
+bash Scripts/xtool-build.sh      # the same, plus verification and a SHA-256 checksum
 ```
 
-Full details, including how to change the bundle identifier at build time, are in
-[BUILD.md](BUILD.md). The archive contract and identifier strategy are in
-[UNSIGNED-IPA.md](UNSIGNED-IPA.md).
+**Prerequisite:** xtool's Darwin Swift SDK, installed once with
+`xtool sdk install /path/to/Xcode.xip --slim`. On this machine that SDK is **not**
+installed, which is the one thing blocking a local xtool build; the exact failure and the
+fix are recorded in [Documentation/XTOOL.md](Documentation/XTOOL.md).
+
+Detailed build steps, the optional CI lane, and how to change the bundle identifier are in
+[BUILD.md](BUILD.md). The archive contract is in [UNSIGNED-IPA.md](UNSIGNED-IPA.md).
 
 ---
 
@@ -86,11 +92,13 @@ in the extension's verdict before install and in the compatibility document.
 ## Repository layout
 
 ```
-project.yml               XcodeGen project definition (the only project file)
-App/Sources/Core/         pure logic â€” models, URL resolution, manifests, ZIP/CRX, filter rules
-App/Sources/Browser/      WKWebView tabs, browser state, content blocker
-App/Sources/Extensions/   Chromex Runtime â€” shim, scheme handler, background pages, bridge
-App/Sources/UI/           SwiftUI screens and design system
+project.yml               legacy XcodeGen definition (optional CI lane only)
+xtool.yml                 xtool app configuration: bundleID, product, resources
+Package.swift             xtool SwiftPM package (library product, Swift 6)
+Sources/CHROMEX/Core/         pure logic â€” models, URL resolution, manifests, ZIP/CRX, filter rules
+Sources/CHROMEX/Browser/      WKWebView tabs, browser state, content blocker
+Sources/CHROMEX/Extensions/   Chromex Runtime â€” shim, scheme handler, background pages, bridge
+Sources/CHROMEX/UI/           SwiftUI screens and design system
 Tests/                    unit tests for the pure core
 Scripts/                    packaging, IPA verification, bundle-id rewrite, icon generation
 .github/workflows/        macOS build â†’ verify â†’ artifact â†’ release
@@ -107,7 +115,8 @@ interception primitive iOS provides.
 
 | Document | Purpose |
 |---|---|
-| [BUILD.md](BUILD.md) | CI pipeline, local builds, troubleshooting |
+| [BUILD.md](BUILD.md) | xtool build pipeline, WSL setup, iPhone testing |
+| [Documentation/XTOOL.md](Documentation/XTOOL.md) | xtool project shape, verified toolchain, SDK blocker |
 | [UNSIGNED-IPA.md](UNSIGNED-IPA.md) | What unsigned means, archive contract, identifiers |
 | [SIGNING-GUIDE.md](SIGNING-GUIDE.md) | Signing tools, bundle-id changes, install, error diagnosis |
 | [EXTENSION-COMPATIBILITY.md](EXTENSION-COMPATIBILITY.md) | Exact supported API surface |
@@ -119,8 +128,9 @@ interception primitive iOS provides.
 ## Requirements
 
 - iOS 17.0 or later on the device.
-- For building: a GitHub account (Actions), or a Mac with Xcode 16+ and XcodeGen.
+- For building: Windows 11 + WSL2, Swift 6.4, xtool, and the xtool Darwin Swift SDK.
 - For signing: any Apple ID (free accounts work, with 7-day certificates).
+- Optional: a GitHub account, only for the CI verification lane.
 
 ---
 

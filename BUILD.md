@@ -1,142 +1,129 @@
-﻿# CHROMEX â€” Build Guide
+# CHROMEX — Build Guide (xtool)
 
-Everything here runs on **GitHub Actions macOS runners**. You never need a Mac, and you
-never need to install Xcode locally.
-
----
-
-## 1. What the pipeline does
-
-`.github/workflows/ios-build.yml` runs on every push to `main`, every pull request, every tag,
-and on demand:
-
-1. checks out the public repository;
-2. installs XcodeGen (the only build dependency);
-3. generates `CHROMEX.xcodeproj` from `project.yml`;
-4. builds the app for `iphoneos` with code signing disabled;
-5. runs the unit tests on an iOS simulator;
-6. packages `Payload/CHROMEX.app` into `CHROMEX-unsigned.ipa`;
-7. verifies the archive is arm64, has a valid `Info.plist`, and contains **no** signature,
-   provisioning profile, or signing material;
-8. uploads the IPA as an artifact;
-9. publishes it to GitHub Releases when the run is a `v*` tag.
-
-No signing identity, certificate, profile, or Apple account is present anywhere in the
-repository or the workflow.
+xtool is the primary build system. It compiles `Package.swift` into an iOS app and
+`xtool dev build --ipa` produces the IPA. No Mac, no Xcode application, no `.xcodeproj`.
 
 ---
 
-## 2. Trigger a build without changing code
+## 1. What you need
 
-```bash
-gh workflow run ios-build.yml          # default bundle id: com.chromex.browser
-gh workflow run ios-build.yml -f bundle_id=com.yourname.chromex
-```
-
-Or use the Actions tab â†’ **iOS unsigned build** â†’ **Run workflow**.
-
-The queue time on a hosted macOS runner is usually 1â€“5 minutes; the build itself is 3â€“6 minutes.
-
-## 3. Get the artifact
-
-```bash
-# latest run's artifact
-gh run list --workflow=ios-build.yml --limit 1
-gh run download <run-id> -n CHROMEX-unsigned-ipa
-```
-
-Or download it from the run page in the Actions tab. Tagged builds also appear under
-**Releases**.
-
----
-
-## 4. Local build (optional)
-
-You only need this if you have a Mac and want a faster loop. The Windows-only path is the
-workflow above.
-
-```bash
-brew install xcodegen
-xcodegen generate
-xcodebuild \
-  -project CHROMEX.xcodeproj \
-  -scheme CHROMEX \
-  -configuration Release \
-  -sdk iphoneos \
-  -destination 'generic/platform=iOS' \
-  -derivedDataPath build \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-  build
-
-bash Scripts/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
-bash Scripts/verify_ipa.sh CHROMEX-unsigned.ipa
-```
-
-Unit tests locally:
-
-```bash
-xcodebuild test -project CHROMEX.xcodeproj -scheme CHROMEX \
-  -destination 'platform=iOS Simulator,name=iPhone 16'
-```
-
----
-
-## 5. Project layout
-
-```
-project.yml                 XcodeGen spec â€” the only project definition
-App/Info.plist              bundle metadata (no entitlements)
-App/CHROMEXApp.swift        SwiftUI entry point
-App/Sources/Core/           pure logic: models, URL parsing, manifests, packages, filter rules
-App/Sources/Browser/        WKWebView tabs, app model, content blocker
-App/Sources/Extensions/     Chromex Runtime: shim, scheme handler, background pages, manager
-App/Sources/UI/             SwiftUI screens
-App/Resources/              asset catalogue and privacy manifest
-Tests/                      unit tests (Foundation-only core)
-Scripts/                      packaging, verification, bundle-id rewrite, icon generation
-```
-
-The test target compiles the Foundation-only core directly, so it needs no host app and no
-WebKit. That is deliberate: it means tests run in seconds and cannot be blocked by UI state.
-
----
-
-## 6. Changing the bundle identifier
-
-Three options, in increasing order of usefulness to other people:
-
-| Who | How |
+| Requirement | Check |
 |---|---|
-| You, at build time | `gh workflow run ios-build.yml -f bundle_id=com.yourname.chromex` |
-| You, in the project | edit `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml` (one place) |
-| Anyone, after download | `bash Scripts/set_bundle_id.sh CHROMEX-unsigned.ipa com.their.id` |
+| Windows 11 + WSL2 (Ubuntu) | `wsl -d Ubuntu` |
+| Swift 6.4 toolchain in WSL | `swift --version` |
+| xtool 1.24+ in WSL | `xtool --version` |
+| **xtool Darwin Swift SDK** | `swift sdk list` prints `darwin` |
 
-The app targets a **single bundle** with no nested app extensions, frameworks or app groups.
-That is a deliberate trade-off: it makes independent signing dramatically more reliable. See
-`UNSIGNED-IPA.md` Â§4.
+Run the gate:
+
+```bash
+bash Scripts/xtool-check.sh
+```
+
+It prints the host, Swift and xtool versions, the SDK status, and whether `Package.swift`
+and `xtool.yml` parse. It exits non-zero if anything is missing.
+
+### The one blocker on this machine
+
+```
+$ xtool sdk status
+Not installed
+
+$ xtool dev build -c release --ipa
+Now generating the Darwin SDK.
+Error: Could not read file or directory at path ''.
+```
+
+xtool builds its Darwin SDK from `Xcode.xip`, `Xcode.app`, or a prebuilt `darwin.xtoolsdk`
+(`xtool sdk install --help`). None of those exist here, and xtool's GitHub releases ship only
+the CLI. Fix it once:
+
+1. Download Xcode from <https://developer.apple.com/download/all/?q=Xcode> (any Apple ID
+   works; no paid programme needed).
+2. `xtool sdk install /mnt/c/Users/<you>/Downloads/Xcode.xip --slim`
+3. `swift sdk list` prints `darwin`; `bash Scripts/xtool-check.sh` then exits 0.
+
+Full detail: [Documentation/XTOOL.md](Documentation/XTOOL.md).
 
 ---
 
-## 7. When the build fails
+## 2. Build
+
+```bash
+xtool dev build -c release --ipa      # the primary command, unsigned IPA
+bash Scripts/xtool-build.sh           # build + verify + SHA-256 into dist/
+```
+
+`xtool dev build --help` (xtool 1.24.0):
+
+```
+USAGE: xtool dev build [--configuration <configuration>] [--sign] [--ipa] [--triple <triple>]
+  -c, --configuration   debug or release
+  -s, --sign            Codesign the built app
+  -i, --ipa             Output a .ipa file instead of a .app
+```
+
+We never pass `--sign`. The archive then contains no signature, no provisioning profile and
+no developer identity. `Scripts/xtool-build.sh` runs `Scripts/verify_ipa.sh`, which fails on
+`_CodeSignature`, `embedded.mobileprovision`, `CodeResources`, `.p12` or `.cer`, and writes
+`dist/CHROMEX-unsigned.ipa.sha256`.
+
+---
+
+## 3. Project layout
+
+```
+Package.swift          library product "CHROMEX" (xtool's template shape)
+xtool.yml              version: 1, bundleID, product, resources
+Sources/CHROMEX/
+  App/                 @main entry point
+  Browser/             WKWebView tabs, app model, content blocker
+  Core/                URL logic, models, manifest, package formats, filter rules
+  Extensions/          Chromex Extensions specification types
+  ExtensionRuntime/    shim, scheme handler, background pages, bridge
+  UI/                  design system and screens
+  Resources/           privacy manifest (asset catalogue excluded from SwiftPM)
+Tests/CHROMEXTests/    XCTest suite (optional CI lane)
+Scripts/               xtool check, build, IPA verification, bundle-id rewrite
+Documentation/         xtool-specific notes
+```
+
+The target is a **library**, not an executable, because that is xtool's own template; `@main`
+lives inside the target.
+
+---
+
+## 4. iPhone testing
+
+1. Connect the iPhone, unlock, tap **Trust**.
+2. WSL2 USB passthrough: install `usbipd-win`, then `usbipd bind --busid <id>` and
+   `usbipd attach --wsl --busid <id>`.
+3. `usbmuxd` must be running (xtool talks to the device through it).
+4. `xtool devices` lists connected devices.
+5. Installing requires a build signed for your device: `xtool dev build -c release --sign`.
+   For independent signing of the unsigned IPA, follow [SIGNING-GUIDE.md](SIGNING-GUIDE.md),
+   then install with `xtool install <file.ipa>` or another signing/install tool.
+
+Developer Mode must be enabled on the iPhone for development-signed builds.
+Building and exporting the IPA does **not** require the iPhone to be connected.
+
+---
+
+## 5. Optional CI lane
+
+`.github/workflows/ios-build.yml` is not the primary build system. It exists so the sources
+are compiled, tested and packaged on every change while the local xtool SDK is unavailable,
+and so a verified unsigned IPA remains downloadable. Its output is not proof that the xtool
+path works; that proof requires the SDK.
+
+---
+
+## 6. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `xcodegen: command not found` | Brew step skipped | `brew install xcodegen` |
-| `No such module 'SwiftUI'` | Wrong SDK/runner | check `xcodebuild -version`; the workflow needs an iOS SDK |
-| `Signing for "CHROMEX" requires a development team` | A signing setting leaked in | confirm the three `CODE_SIGNING_*` flags are present |
-| Simulator destination not found | Runner image changed | the workflow selects the first available iPhone simulator; if none exist, update the runner image |
-| Tests fail but the app builds | logic regression | run `xcodebuild test` locally with the same destination |
-| IPA verification fails | packaging step changed | run `Scripts/verify_ipa.sh` locally against the artifact |
-
-Build logs are uploaded as `build-logs` when a run fails.
-
----
-
-## 8. What is intentionally absent
-
-- No CocoaPods, Carthage, or Swift Package dependencies.
-- No Fastlane.
-- No fastlane match, `ExportOptions.plist`, or archive export step.
-- No `xcodebuild archive`/`-exportArchive`: an unsigned IPA is a plain ZIP of `Payload/`, which
-  is exactly what independent signing tools expect.
-
+| `Error: Could not read file or directory at path ''` | Darwin SDK missing | `xtool sdk install /path/to/Xcode.xip --slim` |
+| `No such module 'UIKit'` | Built with the Linux toolchain | use `xtool dev build`, not `swift build` |
+| `AFCClient.Error.muxError` when installing | usbmuxd / USB passthrough | xtool installation docs, USBIPD section |
+| Signing fails on device | certificate/profile mismatch | [SIGNING-GUIDE.md](SIGNING-GUIDE.md) |
+| CI lane fails after a move | stale paths | update `project.yml` source paths |
