@@ -1,7 +1,7 @@
 # CHROMEX — QA & Release Audit
 
 **Date:** 2026-11-11
-**Commit under test:** `43088437110` CI run (main)
+**Commit under test:** `9debb83` — CI run [43088437110](https://github.com/yagyeshVyas/chromex/actions/runs/43088437110) on `main`
 **Verdict:** the **import and analysis paths are verified**; **runtime/browser behaviour is not**.
 Sideload release is conditionally ready. App Store release is **not** ready.
 
