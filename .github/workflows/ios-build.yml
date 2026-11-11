@@ -103,6 +103,35 @@ jobs:
       - name: Verify the archive is genuinely unsigned
         run: bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
 
+      - name: Prove it can be signed and re-identified independently
+        run: |
+          set -euo pipefail
+          BEFORE="$(shasum -a 256 CHROMEX-unsigned.ipa | awk '{print $1}')"
+
+          WORK="$(mktemp -d)"
+          unzip -q CHROMEX-unsigned.ipa -d "$WORK"
+          APP="$WORK/Payload/CHROMEX.app"
+
+          # Ad-hoc signature: no certificate, no profile. It proves the bundle is
+          # structurally signable and that no stale signature blocks re-signing.
+          codesign --force --sign - --generate-entitlement-der "$APP"
+          codesign --verify --deep --strict --verbose=1 "$APP"
+          echo "ad-hoc signing verified"
+
+          # Identifier rewrite must work on the downloaded artifact.
+          cp CHROMEX-unsigned.ipa "$WORK/probe.ipa"
+          bash tools/set_bundle_id.sh "$WORK/probe.ipa" com.chromex.signingprobe
+          unzip -p "$WORK/probe-com-chromex-signingprobe.ipa" Payload/CHROMEX.app/Info.plist > "$WORK/probe.plist"
+          plutil -lint "$WORK/probe.plist" >/dev/null
+          ID="$(plutil -extract CFBundleIdentifier raw "$WORK/probe.plist")"
+          [ "$ID" = "com.chromex.signingprobe" ] || { echo "identifier rewrite failed: $ID" >&2; exit 1; }
+          echo "identifier rewrite verified: $ID"
+
+          AFTER="$(shasum -a 256 CHROMEX-unsigned.ipa | awk '{print $1}')"
+          [ "$BEFORE" = "$AFTER" ] || { echo "published IPA was mutated by the probe" >&2; exit 1; }
+          rm -rf "$WORK"
+          echo "published artifact is unchanged"
+
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:

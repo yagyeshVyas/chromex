@@ -22,3 +22,7 @@ xcuserdata/
 *.cer
 *.certSigningRequest
 signing/
+
+# Local build logs (CI uploads these as artifacts)
+logs/
+*.log
