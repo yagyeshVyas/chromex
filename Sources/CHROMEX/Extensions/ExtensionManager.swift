@@ -140,6 +140,12 @@ final class ExtensionManager: ObservableObject {
     private var runtimes: [String: ExtensionBackgroundRuntime] = [:]
     private var storages: [String: ExtensionStorage] = [:]
     private var tokens: [String: String] = [:]
+    private var tokenOrder: [String] = []
+    /// Bounded so a long browsing session cannot grow the capability table without limit.
+    private let maxTokens = 2_000
+    /// Cached content-script sources, so navigation does not read the filesystem on
+    /// the main actor every time a matching page loads.
+    private var scriptCache: [String: [String: String]] = [:]
     private var pendingReplies: [Int: (webView: WKWebView, envelopeID: Int)] = [:]
     private var nextRequestID = 1
 
@@ -206,6 +212,7 @@ final class ExtensionManager: ObservableObject {
         )
 
         schemeHandler.register(extensionID: identifier, directory: destination)
+        warmScriptCache(extensionID: identifier, manifest: staged.manifest, directory: destination)
         installed.append(record)
         persist()
         scheduleRuntime(for: record)
@@ -216,6 +223,7 @@ final class ExtensionManager: ObservableObject {
         stopRuntime(for: record.id)
         schemeHandler.unregister(extensionID: record.id)
         storages[record.id] = nil
+        scriptCache[record.id] = nil
         installed.removeAll { $0.id == record.id }
         try? FileManager.default.removeItem(at: root.appendingPathComponent(record.id, isDirectory: true))
         persist()
@@ -229,6 +237,7 @@ final class ExtensionManager: ObservableObject {
             scheduleRuntime(for: installed[index])
         } else {
             stopRuntime(for: record.id)
+            scriptCache[record.id] = nil
         }
     }
 
@@ -306,6 +315,14 @@ final class ExtensionManager: ObservableObject {
     func registerToken(for extensionID: String) -> String {
         let token = UUID().uuidString
         tokens[token] = extensionID
+        tokenOrder.append(token)
+        if tokenOrder.count > maxTokens {
+            let overflow = tokenOrder.count - maxTokens
+            for stale in tokenOrder.prefix(overflow) {
+                tokens[stale] = nil
+            }
+            tokenOrder.removeFirst(overflow)
+        }
         return token
     }
 
@@ -337,7 +354,7 @@ final class ExtensionManager: ObservableObject {
                 result.append(ScriptInjection(source: shim, runAt: .documentStart, allFrames: script.allFrames))
 
                 for path in script.css {
-                    guard let css = readText(path, in: directory) else { continue }
+                    guard let css = readText(path, in: directory, extensionID: record.id) else { continue }
                     result.append(ScriptInjection(
                         source: styleInjectionSource(css: css),
                         runAt: .documentStart,
@@ -345,7 +362,7 @@ final class ExtensionManager: ObservableObject {
                     ))
                 }
                 for path in script.js {
-                    guard let source = readText(path, in: directory) else { continue }
+                    guard let source = readText(path, in: directory, extensionID: record.id) else { continue }
                     result.append(ScriptInjection(source: source, runAt: script.runAt, allFrames: script.allFrames))
                 }
             }
@@ -360,11 +377,29 @@ final class ExtensionManager: ObservableObject {
         """
     }
 
-    private func readText(_ relativePath: String, in directory: URL) -> String? {
+    private func readText(_ relativePath: String, in directory: URL, extensionID: String) -> String? {
+        if let cached = scriptCache[extensionID]?[relativePath] {
+            return cached
+        }
         let candidate = directory.appendingPathComponent(relativePath).standardizedFileURL
         let base = directory.standardizedFileURL.path
         guard candidate.path.hasPrefix(base + "/") else { return nil }
-        return try? String(contentsOf: candidate, encoding: .utf8)
+        guard let text = try? String(contentsOf: candidate, encoding: .utf8) else { return nil }
+        scriptCache[extensionID, default: [:]][relativePath] = text
+        return text
+    }
+
+    /// Reads every declared script once, at install time, so the first matching
+    /// navigation does not pay for disk I/O on the main actor.
+    private func warmScriptCache(extensionID: String, manifest: ExtensionManifest, directory: URL) {
+        for script in manifest.contentScripts {
+            for path in script.js {
+                _ = readText(path, in: directory, extensionID: extensionID)
+            }
+            for path in script.css {
+                _ = readText(path, in: directory, extensionID: extensionID)
+            }
+        }
     }
 
     private func isGranted(record: InstalledExtension, patterns: [String]) -> Bool {
