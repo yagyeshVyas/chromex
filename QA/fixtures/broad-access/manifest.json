@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "All Sites",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

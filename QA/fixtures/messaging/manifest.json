@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Messaging",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://example.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  }
+}

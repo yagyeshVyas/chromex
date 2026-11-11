@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Popup",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Popup"
+  },
+  "permissions": [
+    "storage"
+  ]
+}

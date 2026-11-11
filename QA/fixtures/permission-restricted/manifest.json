@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Narrow Access",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "host_permissions": [
+    "https://allowed.example.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://allowed.example.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

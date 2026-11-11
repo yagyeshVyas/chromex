@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Needs Unavailable APIs",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "permissions": [
+    "alarms",
+    "cookies"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://example.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"manifest_version": 3, "name": "Malicious Traversal", "version": "1.0.0", "description": "CHROMEX QA fixture", "content_scripts": [{"matches": ["<all_urls>"], "js": ["evil.js"]}]}

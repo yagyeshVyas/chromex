@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Storage",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "permissions": [
+    "storage"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  }
+}

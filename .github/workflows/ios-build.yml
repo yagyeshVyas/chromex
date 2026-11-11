@@ -1,4 +1,4 @@
-﻿name: iOS unsigned build
+name: iOS unsigned build
 
 on:
   push:
@@ -87,6 +87,20 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             build 2>&1 | tee build.log
+
+      - name: Generate extension fixtures
+        run: python3 Scripts/make_fixtures.py
+
+      - name: Run Linux QA harness (analysis + benchmarks)
+        run: bash Scripts/qa-linux.sh
+
+      - name: Upload QA reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-reports
+          path: QA/reports
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Run unit tests
         run: |

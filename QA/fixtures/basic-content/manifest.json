@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Basic Content Script",
+  "version": "1.0.0",
+  "description": "CHROMEX QA fixture",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://example.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [
+    "storage"
+  ]
+}
