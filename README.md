@@ -112,6 +112,7 @@ interception primitive iOS provides.
 | [SIGNING-GUIDE.md](SIGNING-GUIDE.md) | Signing tools, bundle-id changes, install, error diagnosis |
 | [EXTENSION-COMPATIBILITY.md](EXTENSION-COMPATIBILITY.md) | Exact supported API surface |
 | [SECURITY.md](SECURITY.md) | Threat model, bridge tokens, reporting |
+| [VERIFICATION.md](VERIFICATION.md) | What was actually built, tested, and inspected — with hashes |
 
 ---
 
