@@ -1,0 +1,91 @@
+name: CHROMEX
+
+options:
+  bundleIdPrefix: com.chromex
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    GCC_TREAT_WARNINGS_AS_ERRORS: NO
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_MODULE_VERIFIER: NO
+
+targets:
+  CHROMEX:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+    settings:
+      base:
+        PRODUCT_NAME: CHROMEX
+        PRODUCT_BUNDLE_IDENTIFIER: com.chromex.browser
+        INFOPLIST_FILE: App/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGN_ENTITLEMENTS: ""
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+
+  CHROMEXTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests
+      # Pure, Foundation-only core is compiled into the test bundle as well so the
+      # unit tests need no host app and no simulator-only WebKit surface.
+      - path: App/Sources/Core/Models.swift
+      - path: App/Sources/Core/URLResolver.swift
+      - path: App/Sources/Core/ExtensionManifest.swift
+      - path: App/Sources/Core/ExtensionPackage.swift
+      - path: App/Sources/Core/AdBlockRules.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chromex.browser.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        SWIFT_VERSION: "6.0"
+
+schemes:
+  CHROMEX:
+    build:
+      targets:
+        CHROMEX: all
+        CHROMEXTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - CHROMEXTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

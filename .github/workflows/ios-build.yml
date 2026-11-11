@@ -1,0 +1,134 @@
+name: iOS unsigned build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: "Bundle identifier for this build"
+        required: false
+        default: "com.chromex.browser"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build CHROMEX (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      BUNDLE_ID: ${{ inputs.bundle_id || 'com.chromex.browser' }}
+      SCHEME: CHROMEX
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          sw_vers
+          xcode-select -p
+          xcodebuild -version
+          echo "bundle id: $BUNDLE_ID"
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Show build settings (signing must be off)
+        run: |
+          xcodebuild -project CHROMEX.xcodeproj -scheme "$SCHEME" -showBuildSettings \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | grep -E 'PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGNING_ALLOWED|CODE_SIGNING_REQUIRED|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM' || true
+
+      - name: Build for iphoneos without code signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CHROMEX.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee build.log
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          DESTINATION_NAME=$(xcodebuild -project CHROMEX.xcodeproj -scheme "$SCHEME" -showdestinations 2>/dev/null \
+            | awk -F'name:' '/platform:iOS Simulator/ {print $2}' \
+            | sed 's/,.*//' | xargs | awk '{print $1" "$2" "$3}' | head -1)
+          if [ -z "$DESTINATION_NAME" ]; then
+            echo "No iOS Simulator destination found" >&2
+            exit 1
+          fi
+          echo "Testing on: $DESTINATION_NAME"
+          xcodebuild test \
+            -project CHROMEX.xcodeproj \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=$DESTINATION_NAME" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee tests.log
+
+      - name: Package unsigned IPA
+        run: |
+          APP="build/Build/Products/Release-iphoneos/CHROMEX.app"
+          bash tools/package_ipa.sh "$APP" CHROMEX-unsigned.ipa
+
+      - name: Verify the archive is genuinely unsigned
+        run: bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CHROMEX-unsigned-ipa
+          path: CHROMEX-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            tests.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" CHROMEX-unsigned.ipa \
+            --title "CHROMEX $GITHUB_REF_NAME — unsigned IPA" \
+            --notes "Certificate-independent unsigned IPA. It contains no signing identity, no provisioning profile and no developer entitlements. Sign it yourself — see SIGNING-GUIDE.md." \
+            --generate-notes \
+            --latest

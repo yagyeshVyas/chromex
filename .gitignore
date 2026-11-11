@@ -1,0 +1,24 @@
+# Build output
+build/
+DerivedData/
+*.ipa
+*.xcarchive
+*.dSYM
+Payload/
+CHROMEX.xcodeproj/
+CHROMEX.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+
+# Local signing material — never commit any of this
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+signing/
