@@ -1,4 +1,4 @@
-# The Unsigned IPA
+﻿# The Unsigned IPA
 
 This document is about exactly one artifact: `CHROMEX-unsigned.ipa`, produced by the macOS
 workflow in this repository. It explains what that file is, what it is **not**, and how to
@@ -6,7 +6,7 @@ verify both claims yourself.
 
 ---
 
-## 1. What "unsigned" means — and what it does not
+## 1. What "unsigned" means â€” and what it does not
 
 An unsigned IPA is a ZIP archive containing `Payload/CHROMEX.app`, where the executable has
 **no `LC_CODE_SIGNATURE`**, the bundle has **no `_CodeSignature/`**, and there is **no
@@ -25,18 +25,18 @@ signing material never leaves your control.
 
 ```
 CHROMEX-unsigned.ipa
-└── Payload/
-    └── CHROMEX.app/
-        ├── CHROMEX                     Mach-O 64-bit executable, arm64
-        ├── Info.plist                  CFBundleIdentifier, version, orientations
-        ├── Assets.car                  compiled asset catalogue (app icon included)
-        ├── PrivacyInfo.xcprivacy       privacy manifest
-        └── ...                         resources
+â””â”€â”€ Payload/
+    â””â”€â”€ CHROMEX.app/
+        â”œâ”€â”€ CHROMEX                     Mach-O 64-bit executable, arm64
+        â”œâ”€â”€ Info.plist                  CFBundleIdentifier, version, orientations
+        â”œâ”€â”€ Assets.car                  compiled asset catalogue (app icon included)
+        â”œâ”€â”€ PrivacyInfo.xcprivacy       privacy manifest
+        â””â”€â”€ ...                         resources
 ```
 
 There is **no** `Frameworks/` directory (no dynamic dependencies), **no** `PlugIns/` or
 `AppExtensions/` directory, and **no** entitlements file. This is a single-bundle app by
-design — see §5.
+design â€” see Â§5.
 
 ## 3. Verifying it yourself
 
@@ -60,7 +60,7 @@ codesign -dv "$APP/CHROMEX" 2>&1               # "code object is not signed at a
 ls "$APP" | grep -i -E 'codesign|provision'    # no output
 ```
 
-The automated equivalent is `tools/verify_ipa.sh`, which exits non-zero if any of the
+The automated equivalent is `Scripts/verify_ipa.sh`, which exits non-zero if any of the
 following is found: `_CodeSignature/`, `embedded.mobileprovision`, `CodeResources`, a `.p12`,
 a `.cer`, a code signature on the executable, a non-arm64 binary, an invalid `Info.plist`,
 `__MACOSX` entries, or a broken ZIP.
@@ -69,7 +69,7 @@ a `.cer`, a code signature on the executable, a non-arm64 binary, an invalid `In
 
 Default: **`com.chromex.browser`**.
 
-The identifier lives in exactly one place in the project (`project.yml` →
+The identifier lives in exactly one place in the project (`project.yml` â†’
 `PRODUCT_BUNDLE_IDENTIFIER`) and is copied into `Info.plist` at build time. Three ways to
 change it:
 
@@ -77,13 +77,13 @@ change it:
 |---|---|
 | Build your own IPA from this repo | `gh workflow run ios-build.yml -f bundle_id=com.you.chromex` |
 | Fork and change it permanently | edit `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml` |
-| You already downloaded the IPA | `bash tools/set_bundle_id.sh CHROMEX-unsigned.ipa com.you.chromex` |
+| You already downloaded the IPA | `bash Scripts/set_bundle_id.sh CHROMEX-unsigned.ipa com.you.chromex` |
 
 A provisioning profile matches an identifier **exactly** (or via a wildcard). If your profile
 is `com.alice.*`, then `com.alice.chromex` will match; `com.chromex.browser` will not.
 Mismatch is the single most common signing failure, and the fix is the table above.
 
-Because the app has no nested bundles, changing the identifier requires no other edits — no
+Because the app has no nested bundles, changing the identifier requires no other edits â€” no
 extension identifiers to keep in sync, no app-group names, no keychain access groups.
 
 ## 5. Identifier-dependent features: what we deliberately do not use
@@ -129,7 +129,7 @@ The signed result is only as good as your signing material:
 | Enterprise / ad-hoc profile | Profile-dependent | Profile-dependent |
 
 CHROMEX reads the entitlements it is given; it never phones home to check them. Nothing in the
-app breaks when a free certificate expires — iOS simply refuses to launch it until you re-sign.
+app breaks when a free certificate expires â€” iOS simply refuses to launch it until you re-sign.
 
 ## 8. Reproducibility
 
@@ -141,9 +141,10 @@ xcodegen generate
 xcodebuild -project CHROMEX.xcodeproj -scheme CHROMEX -configuration Release \
   -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-bash tools/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
+bash Scripts/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
 ```
 
 Byte-identical archives are not guaranteed across Xcode versions (compiler output and ZIP
 metadata vary). The **structure and the absence of signing material are guaranteed**, and
 those are the properties that matter for independent signing.
+

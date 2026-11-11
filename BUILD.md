@@ -1,4 +1,4 @@
-# CHROMEX — Build Guide
+﻿# CHROMEX â€” Build Guide
 
 Everything here runs on **GitHub Actions macOS runners**. You never need a Mac, and you
 never need to install Xcode locally.
@@ -33,9 +33,9 @@ gh workflow run ios-build.yml          # default bundle id: com.chromex.browser
 gh workflow run ios-build.yml -f bundle_id=com.yourname.chromex
 ```
 
-Or use the Actions tab → **iOS unsigned build** → **Run workflow**.
+Or use the Actions tab â†’ **iOS unsigned build** â†’ **Run workflow**.
 
-The queue time on a hosted macOS runner is usually 1–5 minutes; the build itself is 3–6 minutes.
+The queue time on a hosted macOS runner is usually 1â€“5 minutes; the build itself is 3â€“6 minutes.
 
 ## 3. Get the artifact
 
@@ -68,8 +68,8 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
   build
 
-bash tools/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
-bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
+bash Scripts/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
+bash Scripts/verify_ipa.sh CHROMEX-unsigned.ipa
 ```
 
 Unit tests locally:
@@ -84,7 +84,7 @@ xcodebuild test -project CHROMEX.xcodeproj -scheme CHROMEX \
 ## 5. Project layout
 
 ```
-project.yml                 XcodeGen spec — the only project definition
+project.yml                 XcodeGen spec â€” the only project definition
 App/Info.plist              bundle metadata (no entitlements)
 App/CHROMEXApp.swift        SwiftUI entry point
 App/Sources/Core/           pure logic: models, URL parsing, manifests, packages, filter rules
@@ -93,7 +93,7 @@ App/Sources/Extensions/     Chromex Runtime: shim, scheme handler, background pa
 App/Sources/UI/             SwiftUI screens
 App/Resources/              asset catalogue and privacy manifest
 Tests/                      unit tests (Foundation-only core)
-tools/                      packaging, verification, bundle-id rewrite, icon generation
+Scripts/                      packaging, verification, bundle-id rewrite, icon generation
 ```
 
 The test target compiles the Foundation-only core directly, so it needs no host app and no
@@ -109,11 +109,11 @@ Three options, in increasing order of usefulness to other people:
 |---|---|
 | You, at build time | `gh workflow run ios-build.yml -f bundle_id=com.yourname.chromex` |
 | You, in the project | edit `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml` (one place) |
-| Anyone, after download | `bash tools/set_bundle_id.sh CHROMEX-unsigned.ipa com.their.id` |
+| Anyone, after download | `bash Scripts/set_bundle_id.sh CHROMEX-unsigned.ipa com.their.id` |
 
 The app targets a **single bundle** with no nested app extensions, frameworks or app groups.
 That is a deliberate trade-off: it makes independent signing dramatically more reliable. See
-`UNSIGNED-IPA.md` §4.
+`UNSIGNED-IPA.md` Â§4.
 
 ---
 
@@ -126,7 +126,7 @@ That is a deliberate trade-off: it makes independent signing dramatically more r
 | `Signing for "CHROMEX" requires a development team` | A signing setting leaked in | confirm the three `CODE_SIGNING_*` flags are present |
 | Simulator destination not found | Runner image changed | the workflow selects the first available iPhone simulator; if none exist, update the runner image |
 | Tests fail but the app builds | logic regression | run `xcodebuild test` locally with the same destination |
-| IPA verification fails | packaging step changed | run `tools/verify_ipa.sh` locally against the artifact |
+| IPA verification fails | packaging step changed | run `Scripts/verify_ipa.sh` locally against the artifact |
 
 Build logs are uploaded as `build-logs` when a run fails.
 
@@ -139,3 +139,4 @@ Build logs are uploaded as `build-logs` when a run fails.
 - No fastlane match, `ExportOptions.plist`, or archive export step.
 - No `xcodebuild archive`/`-exportArchive`: an unsigned IPA is a plain ZIP of `Payload/`, which
   is exactly what independent signing tools expect.
+

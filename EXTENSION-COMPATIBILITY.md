@@ -1,4 +1,4 @@
-# Extension Compatibility
+﻿# Extension Compatibility
 
 CHROMEX runs Chrome-style extensions through **Chromex Runtime**, a browser-written WebKit
 runtime. This document is the authoritative list of what that runtime actually does. It is
@@ -20,7 +20,7 @@ Every package is analysed **before** it is installed. The result is one of:
 | `runs` | Everything the manifest declares is implemented |
 | `runs-with-limits` | It will run; listed capabilities are missing |
 | `unsupported` | What CHROMEX can run does not add up to a working extension (for example: no content scripts, no popup, no background) |
-| `refused` | It requires `debugger`, `nativeMessaging`, or `webRequestBlocking` — refused by policy and engine |
+| `refused` | It requires `debugger`, `nativeMessaging`, or `webRequestBlocking` â€” refused by policy and engine |
 
 The verdict is computed from the manifest and a fixed catalog. It is deterministic and offline.
 Findings are shown in the app; the limitations below are the same data.
@@ -64,7 +64,7 @@ Every rejection carries a named reason (`PackageError`), shown to the user.
 | `storage.local` | Per-extension JSON key/value store persisted in the app container; `get` / `set` / `remove` / `clear` / `getBytesInUse`, callbacks and promises |
 | `storage.sync`, `storage.session` | **Aliased to local.** There is no Chrome sync service on iOS; values never leave the device |
 | `storage.onChanged` | Fired in the background page after a write |
-| `runtime.sendMessage` | Content script / popup → background page, with response routing |
+| `runtime.sendMessage` | Content script / popup â†’ background page, with response routing |
 | `runtime.onMessage` | Fired in the background page; `sendResponse` supported, including asynchronous responses |
 | `runtime.getURL` | Returns `chromex-extension://<id>/<path>` for packaged resources |
 | `runtime.id` | The installation identifier |
@@ -129,7 +129,7 @@ and never take a page down. An extension that probes an unsupported API still re
   isolated world by default (page JavaScript cannot see them unless the extension injects into
   the page itself).
 - **Popups:** a separate `WKWebView` served from `chromex-extension://`.
-- **Messaging:** content/popup → native → background → native → content, keyed by request id,
+- **Messaging:** content/popup â†’ native â†’ background â†’ native â†’ content, keyed by request id,
   with a typed envelope and a per-injection capability token.
 - **Extension pages:** served by a `WKURLSchemeHandler` with `no-store`, `nosniff`, and a CSP
   that refuses remote script.
@@ -155,10 +155,10 @@ implements the table above, not the whole WebExtensions specification.
 | Dark-mode / CSS restyler | Works |
 | Element hider | Works |
 | Content tweaker / userscript-style | Works |
-| Tab-adjacent helper (active tab) | Partial — `tabs.query` sees the active tab only |
+| Tab-adjacent helper (active tab) | Partial â€” `tabs.query` sees the active tab only |
 | Extension with a popup UI | Works, if it does not need unsupported APIs |
 | Extension with background logic | Works while the app is running |
-| Ad blocker with its own DNR rules | **Not supported** — use CHROMEX's built-in blocker |
+| Ad blocker with its own DNR rules | **Not supported** â€” use CHROMEX's built-in blocker |
 | Network interceptor / proxy | Refused |
 | Cookie editor, download manager | Unsupported |
 | Password manager relying on native APIs | Unsupported (system AutoFill is separate) |
@@ -168,14 +168,14 @@ implements the table above, not the whole WebExtensions specification.
 ## 6. Testing an extension
 
 1. Put a `.zip`, `.crx`, or folder where the Files app can reach it.
-2. In CHROMEX: **Chromex Hub → +** → choose the package.
+2. In CHROMEX: **Chromex Hub â†’ +** â†’ choose the package.
 3. Check the verdict before installing. If it says `runs-with-limits`, the missing pieces are
    listed under "Not available on iOS".
 4. After installing, open a matching page. Content scripts appear in
-   **Hub → Diagnostics → Runtime**, and errors from background pages are listed there.
+   **Hub â†’ Diagnostics â†’ Runtime**, and errors from background pages are listed there.
 5. Disable the extension to stop injection on newly created tabs.
 
-If an extension fails silently, the audit trail is: verdict → grants → Diagnostics. All three
+If an extension fails silently, the audit trail is: verdict â†’ grants â†’ Diagnostics. All three
 are visible in the app; none of them are invented after the fact.
 
 ---
@@ -190,4 +190,5 @@ Open an issue with:
 - the Diagnostics lines, if any.
 
 Claims in this document are testable claims. If the runtime does something this table says it
-does not do — or fails to do something it says it does — that is a bug, not a nuance.
+does not do â€” or fails to do something it says it does â€” that is a bug, not a nuance.
+

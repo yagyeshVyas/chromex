@@ -1,4 +1,4 @@
-name: iOS unsigned build
+﻿name: iOS unsigned build
 
 on:
   push:
@@ -111,10 +111,10 @@ jobs:
       - name: Package unsigned IPA
         run: |
           APP="build/Build/Products/Release-iphoneos/CHROMEX.app"
-          bash tools/package_ipa.sh "$APP" CHROMEX-unsigned.ipa
+          bash Scripts/package_ipa.sh "$APP" CHROMEX-unsigned.ipa
 
       - name: Verify the archive is genuinely unsigned
-        run: bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
+        run: bash Scripts/verify_ipa.sh CHROMEX-unsigned.ipa
 
       - name: Prove it can be signed and re-identified independently
         run: |
@@ -133,7 +133,7 @@ jobs:
 
           # Identifier rewrite must work on the downloaded artifact.
           cp CHROMEX-unsigned.ipa "$WORK/probe.ipa"
-          bash tools/set_bundle_id.sh "$WORK/probe.ipa" com.chromex.signingprobe
+          bash Scripts/set_bundle_id.sh "$WORK/probe.ipa" com.chromex.signingprobe
           unzip -p "$WORK/probe-com-chromex-signingprobe.ipa" Payload/CHROMEX.app/Info.plist > "$WORK/probe.plist"
           plutil -lint "$WORK/probe.plist" >/dev/null
           ID="$(plutil -extract CFBundleIdentifier raw "$WORK/probe.plist")"
@@ -170,7 +170,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" CHROMEX-unsigned.ipa \
-            --title "CHROMEX $GITHUB_REF_NAME — unsigned IPA" \
-            --notes "Certificate-independent unsigned IPA. It contains no signing identity, no provisioning profile and no developer entitlements. Sign it yourself — see SIGNING-GUIDE.md." \
+            --title "CHROMEX $GITHUB_REF_NAME â€” unsigned IPA" \
+            --notes "Certificate-independent unsigned IPA. It contains no signing identity, no provisioning profile and no developer entitlements. Sign it yourself â€” see SIGNING-GUIDE.md." \
             --generate-notes \
             --latest
+

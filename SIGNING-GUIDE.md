@@ -1,4 +1,4 @@
-# Signing Guide
+﻿# Signing Guide
 
 The release is certificate-independent. This guide turns `CHROMEX-unsigned.ipa` into an app
 your iPhone will actually launch, using **your** certificate and **your** provisioning
@@ -48,15 +48,15 @@ codesign -dv chromex-inspect/Payload/CHROMEX.app/CHROMEX
 
 Your profile decides this, not you. Rules:
 
-- Profile `com.alice.chromex` → app id must be **exactly** `com.alice.chromex`.
-- Profile `com.alice.*` (wildcard) → any id starting `com.alice.` works.
-- Profile `*` (rare, usually macOS) → anything works.
+- Profile `com.alice.chromex` â†’ app id must be **exactly** `com.alice.chromex`.
+- Profile `com.alice.*` (wildcard) â†’ any id starting `com.alice.` works.
+- Profile `*` (rare, usually macOS) â†’ anything works.
 
 If the default does not match, rewrite it **before** signing:
 
 ```bash
-bash tools/set_bundle_id.sh CHROMEX-unsigned.ipa com.alice.chromex
-# → CHROMEX-com-alice-chromex.ipa, still unsigned
+bash Scripts/set_bundle_id.sh CHROMEX-unsigned.ipa com.alice.chromex
+# â†’ CHROMEX-com-alice-chromex.ipa, still unsigned
 ```
 
 The app has no nested bundles, so this is the only identifier you need to change. If you are
@@ -80,7 +80,7 @@ profile trusts, embed the profile, repack.
 
 ---
 
-## 5. Method A — Sideloadly (Windows)
+## 5. Method A â€” Sideloadly (Windows)
 
 1. Install Sideloadly from <https://sideloadly.io>.
 2. Connect the iPhone, tap **Trust** on the device.
@@ -88,32 +88,32 @@ profile trusts, embed the profile, repack.
 4. Enter your Apple ID in the **Apple account** field. Sideloadly creates a development
    certificate and a profile for the app automatically.
 5. If Sideloadly reports an identifier mismatch, set the **Bundle ID** field to a value your
-   team owns, or pre-rewrite the IPA with `tools/set_bundle_id.sh`.
+   team owns, or pre-rewrite the IPA with `Scripts/set_bundle_id.sh`.
 6. Press **Start**. Enter the Apple ID password (and 2FA code) when prompted.
-7. On the iPhone: **Settings → General → VPN & Device Management → Developer App** → trust
+7. On the iPhone: **Settings â†’ General â†’ VPN & Device Management â†’ Developer App** â†’ trust
    your Apple ID.
 
 The app installs and launches. With a free Apple ID it stops launching after 7 days; repeating
-steps 3–6 re-signs it.
+steps 3â€“6 re-signs it.
 
-## 6. Method B — AltStore / SideStore
+## 6. Method B â€” AltStore / SideStore
 
 1. Install AltServer on your computer and AltStore on the iPhone (or use SideStore).
-2. In AltStore, **My Apps → +** and choose the IPA.
+2. In AltStore, **My Apps â†’ +** and choose the IPA.
 3. Sign in with your Apple ID when asked.
 4. Keep AltServer reachable on the same network for automatic refresh, or refresh manually
    every 7 days.
 
 This is the most comfortable path if you intend to keep the app long-term on a free account.
 
-## 7. Method C — zsign (scripted, offline)
+## 7. Method C â€” zsign (scripted, offline)
 
 You need a `.p12` certificate and its password, plus a `.mobileprovision` whose App ID matches
 the bundle identifier.
 
 ```bash
 # 1. Match the identifier
-bash tools/set_bundle_id.sh CHROMEX-unsigned.ipa com.alice.chromex
+bash Scripts/set_bundle_id.sh CHROMEX-unsigned.ipa com.alice.chromex
 
 # 2. Sign
 zsign \
@@ -131,7 +131,7 @@ codesign -dv --verbose=2 signed/Payload/CHROMEX.app
 ls signed/Payload/CHROMEX.app/embedded.mobileprovision
 ```
 
-## 8. Method D — manual signing with Xcode command-line tools (macOS)
+## 8. Method D â€” manual signing with Xcode command-line tools (macOS)
 
 Only if you already have a valid certificate and profile and prefer to control every step.
 
@@ -161,7 +161,7 @@ produces `_CodeSignature/CodeResources`.
 
 **This release has none.** `Payload/CHROMEX.app` contains no `Frameworks/`, no `PlugIns/`, and
 no `AppExtensions/`. That is why one profile and one certificate are sufficient, and why
-`tools/set_bundle_id.sh` only has to change one string.
+`Scripts/set_bundle_id.sh` only has to change one string.
 
 If a future release adds nested code, the rule is **inside-out signing**:
 
@@ -187,11 +187,11 @@ nested bundles, `UNSIGNED-IPA.md` will list them and this section will name each
 ## 10. Entitlements
 
 The unsigned app has none. After signing, the app's entitlements are the subset your profile
-grants — typically `application-identifier`, `com.apple.developer.team-identifier`,
+grants â€” typically `application-identifier`, `com.apple.developer.team-identifier`,
 `get-task-allow` (development only), and `keychain-access-groups`.
 
 CHROMEX needs nothing beyond a normal app: no push, no app groups, no associated domains, no
-background modes. If a signing tool offers to add capabilities, decline — adding entitlements
+background modes. If a signing tool offers to add capabilities, decline â€” adding entitlements
 your profile does not authorise produces an install that fails at launch.
 
 To inspect what you actually signed:
@@ -208,13 +208,13 @@ codesign -d --entitlements :- signed/Payload/CHROMEX.app
 |---|---|
 | Sideloadly | Install happens as part of signing |
 | AltStore | Install happens as part of signing |
-| Apple Configurator 2 (Mac) | Add → Apps → choose IPA; device must be supervised or profile-authorized |
-| 3uTools (Windows) | Apps → Import/Install local IPA |
-| Xcode (Mac) | Window → Devices and Simulators → **+** under Installed Apps |
+| Apple Configurator 2 (Mac) | Add â†’ Apps â†’ choose IPA; device must be supervised or profile-authorized |
+| 3uTools (Windows) | Apps â†’ Import/Install local IPA |
+| Xcode (Mac) | Window â†’ Devices and Simulators â†’ **+** under Installed Apps |
 
 After installing with a free/personal certificate, trust it once:
 
-**Settings → General → VPN & Device Management → Developer App → [your Apple ID] → Trust.**
+**Settings â†’ General â†’ VPN & Device Management â†’ Developer App â†’ [your Apple ID] â†’ Trust.**
 
 ---
 
@@ -222,12 +222,12 @@ After installing with a free/personal certificate, trust it once:
 
 | Error | Meaning | Fix |
 |---|---|---|
-| `Provisioning profile "..." doesn't match the bundle identifier` | Profile App ID ≠ `CFBundleIdentifier` | Rewrite the id to match, or use a wildcard profile |
+| `Provisioning profile "..." doesn't match the bundle identifier` | Profile App ID â‰  `CFBundleIdentifier` | Rewrite the id to match, or use a wildcard profile |
 | `Provisioning profile doesn't include signing certificate` | Certificate not in the profile | Regenerate the profile with that certificate |
 | `This device is not included in the provisioning profile` | UDID missing | Add the device (paid account) or let Sideloadly register it |
 | `ApplicationVerificationFailed` | Signature/profile mismatch, or profile expired | Re-sign with a fresh profile; check expiry |
-| `Unable to Install "CHROMEX"` with no detail | Trust prompt declined, or iOS version below 17.0 | Trust the developer; check iOS ≥ 17 |
-| `Untrusted Developer` after launch attempt | Certificate not trusted | Settings → VPN & Device Management → Trust |
+| `Unable to Install "CHROMEX"` with no detail | Trust prompt declined, or iOS version below 17.0 | Trust the developer; check iOS â‰¥ 17 |
+| `Untrusted Developer` after launch attempt | Certificate not trusted | Settings â†’ VPN & Device Management â†’ Trust |
 | App launches then closes immediately | Entitlements not authorised by the profile | Remove added entitlements; re-sign with profile defaults |
 | `The executable was signed with invalid entitlements` | Manual signing without `--generate-entitlement-der` | Re-sign with the flag |
 | `A valid provisioning profile for this executable was not found` | `embedded.mobileprovision` missing from the `.app` | Copy the profile into the bundle **before** `codesign` |
@@ -235,7 +235,7 @@ After installing with a free/personal certificate, trust it once:
 | `The maximum number of apps for free development profiles has been reached` | 3-app free limit | Delete an unused sideloaded app |
 | `Failed to register bundle identifier` | 10 app IDs per 7 days exhausted on a free account | Wait, or reuse an existing id |
 
-If the IPA itself looks wrong, re-run `tools/verify_ipa.sh` — it catches structural problems
+If the IPA itself looks wrong, re-run `Scripts/verify_ipa.sh` â€” it catches structural problems
 before a signing tool reports them as cryptic errors.
 
 ---
@@ -253,3 +253,4 @@ before a signing tool reports them as cryptic errors.
   responsibility to comply.
 - CHROMEX itself collects no analytics and contains no third-party SDKs. Anything the app
   sends over the network is either a page you asked for or an extension you installed.
+

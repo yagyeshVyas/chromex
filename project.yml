@@ -1,4 +1,4 @@
-name: CHROMEX
+﻿name: CHROMEX
 
 options:
   bundleIdPrefix: com.chromex
@@ -27,8 +27,8 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: App/Sources
-      - path: App/Resources
+      - path: Sources/CHROMEX
+      - path: Sources/CHROMEX/Resources
     settings:
       base:
         PRODUCT_NAME: CHROMEX
@@ -57,11 +57,11 @@ targets:
       - path: Tests
       # Pure, Foundation-only core is compiled into the test bundle as well so the
       # unit tests need no host app and no simulator-only WebKit surface.
-      - path: App/Sources/Core/Models.swift
-      - path: App/Sources/Core/URLResolver.swift
-      - path: App/Sources/Core/ExtensionManifest.swift
-      - path: App/Sources/Core/ExtensionPackage.swift
-      - path: App/Sources/Core/AdBlockRules.swift
+      - path: Sources/CHROMEX/Core/Models.swift
+      - path: Sources/CHROMEX/Core/URLResolver.swift
+      - path: Sources/CHROMEX/Core/ExtensionManifest.swift
+      - path: Sources/CHROMEX/Core/ExtensionPackage.swift
+      - path: Sources/CHROMEX/Core/AdBlockRules.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chromex.browser.tests
@@ -89,3 +89,5 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+

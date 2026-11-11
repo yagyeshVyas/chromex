@@ -1,4 +1,4 @@
-# Verification Record
+﻿# Verification Record
 
 This document records what was **actually executed** for CHROMEX 1.0.1, on which infrastructure,
 and what the results were. It exists because "it builds" is a claim, and claims about unsigned
@@ -11,13 +11,13 @@ distribution deserve evidence.
 | | |
 |---|---|
 | Repository | `github.com/yagyeshVyas/chromex` (public) |
-| Release | [v1.0.1 — unsigned IPA](https://github.com/yagyeshVyas/chromex/releases/tag/v1.0.1) |
+| Release | [v1.0.1 â€” unsigned IPA](https://github.com/yagyeshVyas/chromex/releases/tag/v1.0.1) |
 | Asset | `CHROMEX-unsigned.ipa` |
 | Size | 1,345,107 bytes |
 | SHA-256 | `a15857388119653e851af6ccfd14b61ea901b80bc5e4c6191a422e9762efc82a` |
-| Tag build run | [43083503847](https://github.com/yagyeshVyas/chromex/actions/runs/43083503847) — success |
-| Main-branch run | [43083499001](https://github.com/yagyeshVyas/chromex/actions/runs/43083499001) — success |
-| First green run | [43081155839](https://github.com/yagyeshVyas/chromex/actions/runs/43081155839) — success |
+| Tag build run | [43083503847](https://github.com/yagyeshVyas/chromex/actions/runs/43083503847) â€” success |
+| Main-branch run | [43083499001](https://github.com/yagyeshVyas/chromex/actions/runs/43083499001) â€” success |
+| First green run | [43081155839](https://github.com/yagyeshVyas/chromex/actions/runs/43081155839) â€” success |
 
 ## 2. Build infrastructure
 
@@ -38,11 +38,11 @@ distribution deserve evidence.
 | 2 | Report toolchain | `sw_vers`, `xcodebuild -version` printed |
 | 3 | Install XcodeGen | `xcodegen --version` |
 | 4 | Generate project | `CHROMEX.xcodeproj` produced |
-| 5 | Resolve version | tag `v1.0.1` → `MARKETING_VERSION=1.0.1`, build `10` |
+| 5 | Resolve version | tag `v1.0.1` â†’ `MARKETING_VERSION=1.0.1`, build `10` |
 | 6 | Show build settings | signing settings printed as off |
 | 7 | Build for `iphoneos` unsigned | `** BUILD SUCCEEDED **` |
 | 8 | Unit tests on iPhone simulator | 41 tests, 5 suites, `** TEST SUCCEEDED **` |
-| 9 | Package `Payload/` → IPA | `CHROMEX-unsigned.ipa`, 1.3 MB |
+| 9 | Package `Payload/` â†’ IPA | `CHROMEX-unsigned.ipa`, 1.3 MB |
 | 10 | Verify archive | built-in checks passed |
 | 11 | Prove signable + re-identifiable | ad-hoc `codesign --verify` passed; bundle id rewrite passed; artifact SHA unchanged |
 | 12 | Upload artifact | `CHROMEX-unsigned-ipa` artifact present |
@@ -90,19 +90,19 @@ or `.cer`, any `Frameworks/`, any `PlugIns/`, any `__MACOSX` entry.
 The pipeline performs two checks on the published artifact, on the macOS runner, after the IPA
 is built:
 
-1. **Ad-hoc signing** — extracts the app, applies `codesign --force --sign -`, and runs
+1. **Ad-hoc signing** â€” extracts the app, applies `codesign --force --sign -`, and runs
    `codesign --verify --deep --strict`. This proves the bundle is structurally signable and that
    no stale or partial signature blocks re-signing. It uses no certificate and no profile.
-2. **Identifier rewrite** — copies the IPA, runs `tools/set_bundle_id.sh` for
+2. **Identifier rewrite** â€” copies the IPA, runs `Scripts/set_bundle_id.sh` for
    `com.chromex.signingprobe`, re-parses the resulting `Info.plist`, and asserts the identifier
    changed. It then re-hashes the published IPA to prove the probe did not mutate it.
 
 This is the strongest verification possible without a personal Apple certificate. Signing with a
-real identity and profile is, by design, the end user's step — see `SIGNING-GUIDE.md`.
+real identity and profile is, by design, the end user's step â€” see `SIGNING-GUIDE.md`.
 
 ## 6. Test coverage
 
-`Tests/CoreTests.swift` — 41 tests in 5 suites, all passing on an iOS simulator:
+`Tests/CoreTests.swift` â€” 41 tests in 5 suites, all passing on an iOS simulator:
 
 | Suite | What it pins |
 |---|---|
@@ -110,10 +110,10 @@ real identity and profile is, by design, the end user's step — see `SIGNING-GU
 | `HostMatcherTests` | `<all_urls>`, wildcards, scheme matching, non-web rejection |
 | `ManifestTests` | MV2/MV3 parsing, host-permission splitting, analyzer verdicts, grants |
 | `PackageTests` | ZIP extraction, traversal/deep-path rejection, CRX3 payload, staging, missing manifest |
-| `AdBlockRuleTests` | Adblock→regex translation, exceptions, cosmetic rules, JSON shape, built-in list |
+| `AdBlockRuleTests` | Adblockâ†’regex translation, exceptions, cosmetic rules, JSON shape, built-in list |
 
 Not covered by automated tests: SwiftUI layout, WebKit runtime behaviour, extension messaging
-end-to-end. Those require a signed device build and are listed in §7.
+end-to-end. Those require a signed device build and are listed in Â§7.
 
 ## 7. What this verification does **not** claim
 
@@ -132,9 +132,9 @@ is worse than one that does not.
 
 ```bash
 gh run download 43083503847 -n CHROMEX-unsigned-ipa
-shasum -a 256 CHROMEX-unsigned.ipa          # compare with §1
-unzip -l CHROMEX-unsigned.ipa               # compare with §4
-bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
+shasum -a 256 CHROMEX-unsigned.ipa          # compare with Â§1
+unzip -l CHROMEX-unsigned.ipa               # compare with Â§4
+bash Scripts/verify_ipa.sh CHROMEX-unsigned.ipa
 ```
 
 Or rebuild from the tag:
@@ -147,9 +147,10 @@ xcodebuild -project CHROMEX.xcodeproj -scheme CHROMEX -configuration Release \
   PRODUCT_BUNDLE_IDENTIFIER=com.chromex.browser \
   MARKETING_VERSION=1.0.1 CURRENT_PROJECT_VERSION=1 \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-bash tools/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
-bash tools/verify_ipa.sh CHROMEX-unsigned.ipa
+bash Scripts/package_ipa.sh build/Build/Products/Release-iphoneos/CHROMEX.app CHROMEX-unsigned.ipa
+bash Scripts/verify_ipa.sh CHROMEX-unsigned.ipa
 ```
 
-Byte-identical output is not guaranteed across Xcode versions; the structural guarantees in §4
+Byte-identical output is not guaranteed across Xcode versions; the structural guarantees in Â§4
 are.
+

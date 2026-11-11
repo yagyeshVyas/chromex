@@ -1,0 +1,6 @@
+﻿version: 1
+bundleID: com.chromex.browser
+product: CHROMEX
+resources:
+  - Sources/CHROMEX/Resources/PrivacyInfo.xcprivacy
+

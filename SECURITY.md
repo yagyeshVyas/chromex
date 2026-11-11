@@ -1,4 +1,4 @@
-# Security
+﻿# Security
 
 CHROMEX runs code it did not write, imported by the user from outside the App Store
 distribution model. This document describes the model that makes that defensible, and the
@@ -8,7 +8,7 @@ parts that are deliberately out of scope.
 
 ## 1. Reporting a vulnerability
 
-Open a **private** security advisory via the repository's **Security → Advisories → Report a
+Open a **private** security advisory via the repository's **Security â†’ Advisories â†’ Report a
 vulnerability** tab. Do not open a public issue for anything that could be exploited.
 
 Please include: affected version, steps to reproduce, and whether the issue requires a
@@ -40,11 +40,11 @@ the backend because there is no backend.
 ### 3.1 Trust boundaries
 
 ```
-trusted        SwiftUI · AppModel · ExtensionManager · WebKit (system)
-               ▲
-semi-trusted   extension JavaScript · extension pages served from a private scheme
-               ▲
-untrusted      imported packages · websites · page JavaScript
+trusted        SwiftUI Â· AppModel Â· ExtensionManager Â· WebKit (system)
+               â–²
+semi-trusted   extension JavaScript Â· extension pages served from a private scheme
+               â–²
+untrusted      imported packages Â· websites Â· page JavaScript
 ```
 
 The only place a bug becomes a breach is the boundary between semi-trusted and trusted: the
@@ -59,7 +59,7 @@ native message bridge. It is therefore the most constrained code in the project.
 | Malicious package escapes the container | ZIP path containment, absolute-path and `..` rejection, symlink-free extraction, 16-component depth cap | Unknown parser bug |
 | Zip bomb / resource exhaustion | Entry count, per-entry size, total size, compression ratio caps enforced before decompression | CPU spent before a cap trips |
 | Remote code in an extension page | CSP on the extension scheme: `script-src 'self' chromex-extension:`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'` | Locally bundled obfuscated code |
-| Extension reaches a native iOS API | No bridge to UIKit/Foundation capabilities exists; the runtime exposes only browser-shaped calls | A future feature could add one — reviewed as a security change |
+| Extension reaches a native iOS API | No bridge to UIKit/Foundation capabilities exists; the runtime exposes only browser-shaped calls | A future feature could add one â€” reviewed as a security change |
 | Permission escalation after install | Grants are fixed at install time and shown in the Hub; no runtime permission requests in this build | Re-install with broader grants is visible |
 | Private browsing leaks into history | Private tabs use a non-persistent data store and are excluded from history and session restore; extensions do not inject into private tabs | OS-level snapshot cache |
 | Data theft at rest | iOS default file protection (`NSFileProtectionCompleteUntilFirstUserAuthentication`) for app-container files | Device passcode is the boundary |
@@ -70,7 +70,7 @@ native message bridge. It is therefore the most constrained code in the project.
 ## 4. The capability token
 
 The bridge is a `WKScriptMessageHandler` named `chromexBridge`. Its name is visible to page
-JavaScript, so the security does not come from secrecy of the channel — it comes from the token.
+JavaScript, so the security does not come from secrecy of the channel â€” it comes from the token.
 
 At injection time `ExtensionManager` generates a random UUID, maps it to an extension id, and
 substitutes it into the JavaScript shim. The shim keeps the token inside a closure:
@@ -78,8 +78,8 @@ substitutes it into the JavaScript shim. The shim keeps the token inside a closu
 ```js
 (function () {
   "use strict";
-  var TOKEN = "…uuid…";          // not reachable from page scope
-  window.chrome = { … };          // page can call this
+  var TOKEN = "â€¦uuidâ€¦";          // not reachable from page scope
+  window.chrome = { â€¦ };          // page can call this
 })();
 ```
 
@@ -167,7 +167,7 @@ ship in the binary.
 - Jailbroken devices and platform-level attacks.
 - Malicious signing tools: once you sign an IPA, the signer can modify it.
 - Extensions that are deliberately deceptive but technically within their granted permissions.
-- Apple's own WebKit vulnerabilities — patching the OS is the mitigation.
+- Apple's own WebKit vulnerabilities â€” patching the OS is the mitigation.
 
 ---
 
@@ -182,3 +182,4 @@ ship in the binary.
 - Security-relevant code paths (package parsing, bridge routing) are unit-tested, including
   traversal, deep paths, CRX version rejection and token-less messages.
 - Dependency surface: none. No third-party packages, no SDKs, no Fastlane.
+
