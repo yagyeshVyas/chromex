@@ -122,6 +122,8 @@ interception primitive iOS provides.
 | [EXTENSION-COMPATIBILITY.md](EXTENSION-COMPATIBILITY.md) | Exact supported API surface |
 | [SECURITY.md](SECURITY.md) | Threat model, bridge tokens, reporting |
 | [VERIFICATION.md](VERIFICATION.md) | What was actually built, tested, and inspected â€” with hashes |
+| [QA/REPORT.md](QA/REPORT.md) | QA audit: executed tests, extension results, defects, performance, readiness |
+| [RELEASE.md](RELEASE.md) | Metadata, privacy disclosures, App Store checklist, TestFlight, release notes |
 
 ---
 

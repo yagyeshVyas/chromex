@@ -4,7 +4,7 @@
 
 ## Analysis result
 
-Rejected before analysis: The operation could not be completed. The data is not in the correct format.
+Rejected before analysis: manifest.json is not a JSON object.
 
 ## Execution results (device required)
 
