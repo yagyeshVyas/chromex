@@ -31,3 +31,6 @@ logs/
 .build/
 .swiftpm/
 dist/
+
+# Local device screenshots (may contain personal device UI)
+screenshots/
