@@ -144,8 +144,8 @@ interception primitive iOS provides.
 | Unsigned IPA | **Built and verified** — `dist/CHROMEX-unsigned.ipa`, SHA-256 in `dist/SHA256SUMS.txt` |
 | xtool build | **Blocked** — Darwin Swift SDK not installed (`xtool sdk install <Xcode.xip>`) |
 | iPhone from WSL | **Blocked** — Windows sees it; WSL needs `usbipd` passthrough and `usbmuxd` |
-| Device installation | **Blocked** — unsigned artifact + no signing credentials used |
-| Browser/extension runtime testing | **Not run** — requires a signed device build |
+| Device installation | **Pass** — signed locally with existing assets, installed via `pymobiledevice3`, launched (PID alive, no crash log) |
+| Browser/extension runtime testing | **Not run** — app launches, but UI interaction was not exercised |
 
 ## Known issues
 

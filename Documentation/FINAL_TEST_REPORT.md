@@ -55,7 +55,8 @@ These require a signed build on the iPhone. None was performed.
 
 | Area | Status |
 |---|---|
-| Launch, startup crash, first-run UI | **Not run** |
+| Installation and launch | **Pass** — installed, PID 70343 alive, no crash log |
+| Launch, startup crash, first-run UI | **Launch verified; UI not exercised** |
 | Navigation, HTTPS, JS-heavy sites, auth, cookies | **Not run** |
 | Tabs, tab groups, restoration | **Not run** |
 | Downloads, bookmarks, history | **Not run** |

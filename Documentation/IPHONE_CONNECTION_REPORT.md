@@ -107,3 +107,14 @@ xtool devices
 
 Expected diagnostic exit code after fixing the SDK: `0`. Until then it is `12` (SDK) or `13`/`14`
 (device stack).
+
+---
+
+## 8. Update — 2026-11-13: install path used Windows tooling
+
+The iPhone is still invisible to WSL, but installation succeeded from **Windows** using
+pymobiledevice3 over usbmux, after signing the IPA locally with the existing certificate/profile.
+See DEVICE_INSTALLATION_REPORT.md.
+
+So the WSL passthrough steps above remain required only for xtool/device work **inside WSL**.
+Windows-side install and launch do not need usbipd.
