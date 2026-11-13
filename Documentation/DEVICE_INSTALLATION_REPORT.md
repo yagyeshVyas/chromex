@@ -3,7 +3,8 @@
 **Result: INSTALLED AND LAUNCHED on the physical iPhone.**
 Device: `Mafia` (iPhone16,2, iOS 27.2, UDID `00008130-000E35E60E30001C`)
 Installed bundle: `app.mountain3690.pegasus6317` (display name **CHROMEX**)
-Time: 2026-11-13 11:07 local
+Time: 2026-11-13 11:07 local (initial) — **reinstalled 11:18 with build 26**, which contains the security-scoped import fix
+Launch after reinstall: processIdentifier **70440**, no crash report
 
 ---
 
