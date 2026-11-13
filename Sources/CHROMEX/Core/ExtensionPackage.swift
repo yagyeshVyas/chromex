@@ -18,6 +18,7 @@ enum PackageError: Error, LocalizedError, Equatable {
     case compressionRatioExceeded(String)
     case decompressionFailed(String)
     case missingManifest
+    case unreadableSource(String)
     case invalidCRXMagic
     case unsupportedCRXVersion(Int)
     case invalidCRXHeader
@@ -39,6 +40,8 @@ enum PackageError: Error, LocalizedError, Equatable {
         case .compressionRatioExceeded(let path): return "The archive entry expands suspiciously: \(path)"
         case .decompressionFailed(let path): return "Could not decompress \(path)."
         case .missingManifest: return "The package has no manifest.json at its root."
+        case .unreadableSource(let detail):
+            return "CHROMEX could not read the selected file. Move it into the CHROMEX folder in Files (or On My iPhone), then import again. (\(detail))"
         case .invalidCRXMagic: return "This is not a CRX file (missing Cr24 header)."
         case .unsupportedCRXVersion(let version): return "CRX version \(version) is not supported. CHROMEX reads CRX3 only."
         case .invalidCRXHeader: return "The CRX header is malformed."
@@ -304,7 +307,15 @@ struct StagedPackage: Sendable {
 enum ExtensionPackage {
     /// Copies/stages a user-selected package into a fresh temporary directory and
     /// analyses it. Never writes outside the temporary directory.
+    ///
+    /// Document-picker URLs are security-scoped: reading one without starting the
+    /// scope fails with `NSFileReadNoPermissionError` ("you don't have permission
+    /// to view it"). The scope is therefore started for every source, file or
+    /// folder, for the whole staging operation.
     static func stage(from url: URL, limits: PackageLimits = .default) throws -> StagedPackage {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
         let manager = FileManager.default
         let staging = manager.temporaryDirectory
             .appendingPathComponent("chromex-import-\(UUID().uuidString)", isDirectory: true)
@@ -317,7 +328,12 @@ enum ExtensionPackage {
             kind = .folder
             try copyDirectory(from: url, to: staging)
         } else {
-            let data = try Data(contentsOf: url)
+            let data: Data
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                throw PackageError.unreadableSource(error.localizedDescription)
+            }
             let ext = url.pathExtension.lowercased()
             if ext == "crx" {
                 kind = .crx
@@ -360,9 +376,12 @@ enum ExtensionPackage {
 
     private static func copyDirectory(from source: URL, to destination: URL) throws {
         let manager = FileManager.default
-        let accessed = source.startAccessingSecurityScopedResource()
-        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
-        let contents = try manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+        let contents: [URL]
+        do {
+            contents = try manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+        } catch {
+            throw PackageError.unreadableSource(error.localizedDescription)
+        }
         for item in contents {
             let target = destination.appendingPathComponent(item.lastPathComponent)
             try manager.copyItem(at: item, to: target)
