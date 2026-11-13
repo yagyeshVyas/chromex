@@ -124,6 +124,46 @@ interception primitive iOS provides.
 | [VERIFICATION.md](VERIFICATION.md) | What was actually built, tested, and inspected â€” with hashes |
 | [QA/REPORT.md](QA/REPORT.md) | QA audit: executed tests, extension results, defects, performance, readiness |
 | [RELEASE.md](RELEASE.md) | Metadata, privacy disclosures, App Store checklist, TestFlight, release notes |
+| [Documentation/FINAL_AUDIT.md](Documentation/FINAL_AUDIT.md) | Issues found, severity, fixes, verification |
+| [Documentation/IPHONE_CONNECTION_REPORT.md](Documentation/IPHONE_CONNECTION_REPORT.md) | Device detection status and WSL passthrough steps |
+| [Documentation/BUILD_VERIFICATION.md](Documentation/BUILD_VERIFICATION.md) | xtool vs CI build evidence |
+| [Documentation/UNSIGNED_IPA_VERIFICATION.md](Documentation/UNSIGNED_IPA_VERIFICATION.md) | Why the artifact is unsigned, with checks |
+| [Documentation/DEVICE_INSTALLATION_REPORT.md](Documentation/DEVICE_INSTALLATION_REPORT.md) | Why installation is blocked and what it needs |
+| [Documentation/EXTENSION_TEST_REPORT.md](Documentation/EXTENSION_TEST_REPORT.md) | Extension results and compatibility matrix |
+| [Documentation/FINAL_TEST_REPORT.md](Documentation/FINAL_TEST_REPORT.md) | 57 XCTest + 35 Linux checks, and the untested list |
+| [Documentation/RELEASE_GUIDE.md](Documentation/RELEASE_GUIDE.md) | Build, verify, sign, install, checklist |
+
+---
+
+## Current status (2026-11-11)
+
+| Area | Status |
+|---|---|
+| Swift compilation for iOS | **Pass** — Xcode 16.4, CI run 43089913502 |
+| Automated tests | **57/57 pass** on simulator; 35/35 Linux QA checks |
+| Unsigned IPA | **Built and verified** — `dist/CHROMEX-unsigned.ipa`, SHA-256 in `dist/SHA256SUMS.txt` |
+| xtool build | **Blocked** — Darwin Swift SDK not installed (`xtool sdk install <Xcode.xip>`) |
+| iPhone from WSL | **Blocked** — Windows sees it; WSL needs `usbipd` passthrough and `usbmuxd` |
+| Device installation | **Blocked** — unsigned artifact + no signing credentials used |
+| Browser/extension runtime testing | **Not run** — requires a signed device build |
+
+## Known issues
+
+- Extension options pages are not hosted; CRX signatures are not verified.
+- `webRequest`, cookies, alarms, i18n and per-extension DNR are unsupported and reported before install.
+- Background execution stops when the app is suspended.
+- Content-script sources are cached at install; removing an extension clears its cache.
+- No screenshots have been captured.
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `xtool dev build` says `Could not read file or directory at path ''` | Install the Darwin SDK: `xtool sdk install /path/to/Xcode.xip --slim` |
+| `xtool devices` prints nothing | Install `usbipd-win`, attach the iPhone to WSL, start `usbmuxd` |
+| `idevice_id -l` fails in WSL | Same as above; confirm the phone shows in Windows device manager |
+| `verify_ipa.sh` fails | Run it from the repo root on the artifact; see `Documentation/UNSIGNED_IPA_VERIFICATION.md` |
+| Signing error on device | `SIGNING-GUIDE.md` §12 error table |
 
 ---
 
