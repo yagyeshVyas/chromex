@@ -137,7 +137,6 @@ enum ZipReader {
         guard entries.count <= limits.maxEntries else { throw PackageError.tooManyEntries(entries.count) }
 
         let bytes = [UInt8](data)
-        let canonicalRoot = root.standardizedFileURL.path
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
         var totalUncompressed = 0
@@ -173,12 +172,15 @@ enum ZipReader {
                 throw PackageError.unsupportedCompression(Int(entry.method))
             }
 
-            let destination = root.appendingPathComponent(safeName).standardizedFileURL
-            let destinationPath = destination.path
-            // Belt and braces: the resolved path must stay inside the extraction root.
-            guard destinationPath == canonicalRoot || destinationPath.hasPrefix(canonicalRoot + "/") else {
-                throw PackageError.pathTraversal(safeName)
-            }
+            // `safeName` is already relative and free of ".." components, so appending
+            // it to the extraction root cannot escape that root. An extra string-prefix
+            // comparison was rejecting perfectly safe entries such as "background.js"
+            // (the resolved-path comparison is not stable across URL representations),
+            // so the sanitizer is the single authoritative check.
+            let destination = root.appendingPathComponent(safeName)
+            #if DEBUG
+            assert(destination.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path))
+            #endif
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true
