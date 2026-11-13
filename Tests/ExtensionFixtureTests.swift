@@ -149,4 +149,14 @@ final class ExtensionFixtureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: escaped.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: staged.directory.appendingPathComponent("manifest.json").path))
     }
+
+    func testUnreadableSourceProducesActionableError() {
+        let missing = repositoryRoot.appendingPathComponent("QA/fixtures/zips/does-not-exist.zip")
+        XCTAssertThrowsError(try ExtensionPackage.stage(from: missing)) { error in
+            guard let packageError = error as? PackageError,
+                  case .unreadableSource = packageError else {
+                return XCTFail("expected unreadableSource, got \(error)")
+            }
+        }
+    }
 }
