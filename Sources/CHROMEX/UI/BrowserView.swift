@@ -88,6 +88,9 @@ struct BrowserView: View {
         .sheet(item: $model.popupExtension) { record in
             ExtensionPopupView(record: record)
         }
+        .sheet(item: $model.optionsExtension) { record in
+            ExtensionOptionsView(record: record)
+        }
         .sheet(item: $shareItem) { item in
             ActivityView(activityItems: [item.url])
                 .presentationDetents([.medium, .large])

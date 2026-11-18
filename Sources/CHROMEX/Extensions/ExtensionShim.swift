@@ -18,6 +18,7 @@ enum ExtensionShim {
           var TOKEN = "__CHROMEX_TOKEN__";
           var EXT_ID = "__CHROMEX_EXT_ID__";
           var CONTEXT = "__CHROMEX_CONTEXT__";
+          var UI_LANGUAGE = "__CHROMEX_UI_LANGUAGE__";
           var BASE = "chromex-extension://" + EXT_ID + "/";
           var pending = {};
           var nextID = 1;
@@ -134,8 +135,49 @@ enum ExtensionShim {
             return withCallback(request("tabs.create", { options: options || {} }), callback);
           };
 
+          chrome.i18n = chrome.i18n || {};
+          chrome.i18n.getMessage = function (name, substitutions, callback) {
+            var subs = [];
+            if (typeof substitutions === "string") { subs = [substitutions]; }
+            else if (Array.isArray(substitutions)) { subs = substitutions; }
+            var promise = request("i18n.getMessage", { name: String(name), substitutions: subs }).then(function (value) {
+              return value === null || value === undefined ? "" : String(value);
+            });
+            if (typeof callback === "function") { promise.then(callback); return undefined; }
+            return promise;
+          };
+          chrome.i18n.getUILanguage = function () { return UI_LANGUAGE; };
+          chrome.i18n.getAcceptLanguages = function (callback) {
+            return withCallback(request("i18n.getAcceptLanguages", {}), callback);
+          };
+
+          chrome.permissions = chrome.permissions || {};
+          chrome.permissions.contains = function (permissions, callback) {
+            return withCallback(request("permissions.contains", { permissions: permissions || {} }), callback);
+          };
+          chrome.permissions.getAll = function (callback) {
+            return withCallback(request("permissions.getAll", {}), callback);
+          };
+          chrome.permissions.request = function (permissions, callback) {
+            return withCallback(request("permissions.request", { permissions: permissions || {} }), callback);
+          };
+
+          var actionListeners = [];
           chrome.action = chrome.action || {};
-          chrome.action.setBadgeText = function () { /* not supported in this build */ };
+          chrome.action.setBadgeText = function () { /* no badge surface in this build */ };
+          chrome.action.onClicked = {
+            addListener: function (listener) {
+              if (typeof listener === "function") { actionListeners.push(listener); }
+            },
+            removeListener: function (listener) {
+              actionListeners = actionListeners.filter(function (item) { return item !== listener; });
+            }
+          };
+          window.__chromexActionClicked = function () {
+            actionListeners.forEach(function (listener) {
+              try { listener({ id: EXT_ID }); } catch (error) {}
+            });
+          };
 
           window.__chromexStorageChanged = function (changesJson) {
             var changes;
@@ -177,10 +219,14 @@ enum ExtensionShim {
         })();
         """#
 
+        let uiLanguage = Locale.current.language.languageCode?.identifier
+            ?? Locale.current.identifier
+            ?? "en"
         return template
             .replacingOccurrences(of: "__CHROMEX_TOKEN__", with: token)
             .replacingOccurrences(of: "__CHROMEX_EXT_ID__", with: extensionID)
             .replacingOccurrences(of: "__CHROMEX_CONTEXT__", with: context)
+            .replacingOccurrences(of: "__CHROMEX_UI_LANGUAGE__", with: uiLanguage)
     }
 
     /// Wraps a background script in a minimal HTML document so WebKit can host it.

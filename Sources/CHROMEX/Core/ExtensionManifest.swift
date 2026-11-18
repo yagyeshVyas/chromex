@@ -46,6 +46,8 @@ struct ExtensionManifest: Sendable {
     var backgroundKind: BackgroundKind
     var icons: [String: String]
     var contentSecurityPolicy: String?
+    /// `default_locale` from the manifest; selects the folder under `_locales`.
+    var defaultLocale: String? = nil
 }
 
 enum ManifestError: Error, LocalizedError, Equatable {
@@ -163,7 +165,8 @@ enum ManifestParser {
             backgroundPage: backgroundPage,
             backgroundKind: backgroundKind,
             icons: (root["icons"] as? [String: String]) ?? [:],
-            contentSecurityPolicy: contentSecurityPolicy(from: root["content_security_policy"])
+            contentSecurityPolicy: contentSecurityPolicy(from: root["content_security_policy"]),
+            defaultLocale: root["default_locale"] as? String
         )
     }
 
@@ -326,7 +329,7 @@ enum ExtensionAPICatalog {
         APIEntry(name: "action (popup)", status: .supported, note: "The declared popup opens in a CHROMEX sheet."),
         APIEntry(name: "action.setBadgeText", status: .unsupported, note: "No badge surface in this build."),
         APIEntry(name: "scripting.executeScript", status: .unsupported, note: "Use declared content_scripts instead."),
-        APIEntry(name: "i18n", status: .unsupported, note: "_locales is not resolved in this build."),
+        APIEntry(name: "i18n", status: .supported, note: "getMessage resolves _locales; missing keys fall back to the key name."),
         APIEntry(name: "alarms", status: .unsupported, note: "iOS cannot keep a background scheduler alive."),
         APIEntry(name: "notifications", status: .unsupported, note: "Not bridged in this build."),
         APIEntry(name: "contextMenus", status: .unsupported, note: "Not bridged in this build."),

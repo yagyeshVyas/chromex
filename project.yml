@@ -60,6 +60,7 @@ targets:
       - path: Sources/CHROMEX/Core/Models.swift
       - path: Sources/CHROMEX/Core/URLResolver.swift
       - path: Sources/CHROMEX/Core/ExtensionManifest.swift
+      - path: Sources/CHROMEX/Core/ExtensionLocalization.swift
       - path: Sources/CHROMEX/Core/ExtensionPackage.swift
       - path: Sources/CHROMEX/Core/AdBlockRules.swift
     settings:

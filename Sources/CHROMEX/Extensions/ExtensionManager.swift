@@ -146,6 +146,7 @@ final class ExtensionManager: ObservableObject {
     /// Cached content-script sources, so navigation does not read the filesystem on
     /// the main actor every time a matching page loads.
     private var scriptCache: [String: [String: String]] = [:]
+    private var localizations: [String: ExtensionLocalization] = [:]
     private var pendingReplies: [Int: (webView: WKWebView, envelopeID: Int)] = [:]
     private var nextRequestID = 1
 
@@ -310,6 +311,62 @@ final class ExtensionManager: ObservableObject {
         return webView
     }
 
+    func makeOptionsWebView(for record: InstalledExtension) -> WKWebView? {
+        guard record.isEnabled, let manifest = record.manifest,
+              let options = manifest.optionsPage else { return nil }
+
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(schemeHandler, forURLScheme: ExtensionSchemeHandler.scheme)
+        let token = registerToken(for: record.id)
+        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "options")
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+        configuration.userContentController.add(bridge, name: "chromexBridge")
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        if let url = URL(string: "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(options)") {
+            webView.load(URLRequest(url: url))
+        }
+        return webView
+    }
+
+    /// Fires `chrome.action.onClicked` in the extension's background page.
+    /// Chrome does not fire it when a popup is declared; we match that.
+    func dispatchActionClick(for record: InstalledExtension) {
+        guard record.manifest?.action?.defaultPopup == nil else {
+            appendDiagnostic("\(record.displayName): action click ignored — the extension declares a popup")
+            return
+        }
+        guard let runtime = runtimes[record.id] else {
+            appendDiagnostic("\(record.displayName): no running background page for action click")
+            return
+        }
+        runtime.sendActionClicked()
+    }
+
+    private func localization(for record: InstalledExtension) -> ExtensionLocalization? {
+        if let cached = localizations[record.id] { return cached }
+        let directory = root.appendingPathComponent(record.id, isDirectory: true)
+        guard let loaded = ExtensionLocalization.load(
+            directory: directory,
+            defaultLocale: record.manifest?.defaultLocale
+        ) else { return nil }
+        localizations[record.id] = loaded
+        return loaded
+    }
+
+    private func permissionsSatisfied(_ requested: [String: Any], by record: InstalledExtension) -> Bool {
+        let permissions = requested["permissions"] as? [String] ?? []
+        let origins = requested["origins"] as? [String] ?? []
+        let declared = Set(record.manifest?.permissions ?? [])
+        let granted = Set(record.grants)
+        let declaredOK = permissions.allSatisfy { declared.contains($0) }
+        let originsOK = origins.allSatisfy { granted.contains($0) || granted.contains("<all_urls>") }
+        return declaredOK && originsOK
+    }
+
     // MARK: Caps
 
     func registerToken(for extensionID: String) -> String {
@@ -463,6 +520,25 @@ final class ExtensionManager: ObservableObject {
             } else {
                 reply(on: webView, id: envelopeID, value: nil, error: "tabs.create expects { url }")
             }
+
+        case "i18n.getMessage":
+            let name = payload["name"] as? String ?? ""
+            let substitutions = payload["substitutions"] as? [String] ?? []
+            let value = localization(for: record)?.message(for: name, substitutions: substitutions)
+            reply(on: webView, id: envelopeID, value: value, error: nil)
+
+        case "i18n.getAcceptLanguages":
+            reply(on: webView, id: envelopeID, value: ["en-US", "en"], error: nil)
+
+        case "permissions.contains", "permissions.request":
+            let requested = payload["permissions"] as? [String: Any] ?? [:]
+            reply(on: webView, id: envelopeID, value: permissionsSatisfied(requested, by: record), error: nil)
+
+        case "permissions.getAll":
+            reply(on: webView, id: envelopeID, value: [
+                "permissions": record.manifest?.permissions ?? [],
+                "origins": record.grants
+            ], error: nil)
 
         case "runtime.sendMessage":
             let message = payload["message"]

@@ -252,6 +252,12 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
+    /// Fires `chrome.action.onClicked` inside the background page.
+    func sendActionClicked() {
+        guard isReady else { return }
+        webView.evaluateJavaScript("window.__chromexActionClicked && window.__chromexActionClicked();", completionHandler: nil)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isReady = true
         flushPending()

@@ -71,6 +71,13 @@ Every rejection carries a named reason (`PackageError`), shown to the user.
 | `tabs.query` | Reports the active tab. `url` is only included when the extension holds host access |
 | `tabs.create` | Opens a real CHROMEX tab |
 | `action.default_popup` | Opens in a native sheet with its own web view |
+| `action.onClicked` | Fired from the extension detail screen's **Trigger action** button when no popup is declared |
+| `i18n.getMessage` | Resolves `_locales/<default_locale>/messages.json`, named placeholders and `$1` substitution |
+| `i18n.getUILanguage` | Returns the device UI language |
+| `i18n.getAcceptLanguages` | Returns a stable `en-US`, `en` list |
+| `permissions.contains` | True only for permissions/hosts the manifest declares and the user granted |
+| `permissions.getAll` | Returns declared permissions and granted origins |
+| `options_page` / `options_ui` | Hosted in a sheet from the extension detail screen |
 | `action.setBadgeText` | Accepted as a no-op; there is no badge surface in this build |
 
 ### 3.2 Unsupported (declared in the catalog, shown before install)
@@ -81,7 +88,6 @@ Every rejection carries a named reason (`PackageError`), shown to the user.
 | `webRequestBlocking` | Refused: no interception is possible |
 | `declarativeNetRequest` | Per-extension rule sets are not bridged. CHROMEX's own declarative blocker is separate and always available |
 | `scripting.executeScript` | Use declared `content_scripts`; dynamic script injection is not bridged in this build |
-| `i18n` | `_locales` is not resolved in this build |
 | `alarms` | iOS cannot keep a background scheduler alive |
 | `notifications` | Not bridged in this build |
 | `contextMenus` | Not bridged in this build |
@@ -113,7 +119,7 @@ and never take a page down. An extension that probes an unsupported API still re
 | `permissions`, `host_permissions` | Drive the consent sheet |
 | `optional_permissions` | Parsed but not requestable at runtime in this build |
 | `web_accessible_resources` | Resolved through the extension scheme |
-| `options_page` / `options_ui` | Parsed; **not hosted** in this build (no options UI) |
+| `options_page` / `options_ui` | Parsed and hosted in a sheet from the extension detail screen |
 | `content_security_policy` | Parsed; extension pages always get CHROMEX's own restrictive CSP |
 | `update_url` | Ignored |
 | `devtools_page`, `side_panel` | Unsupported |

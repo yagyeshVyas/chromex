@@ -225,6 +225,10 @@ struct ExtensionDetailView: View {
         current.manifest?.action?.defaultPopup != nil
     }
 
+    private var hasOptions: Bool {
+        current.manifest?.optionsPage != nil
+    }
+
     var body: some View {
         ZStack {
             BrowserBackground()
@@ -239,6 +243,12 @@ struct ExtensionDetailView: View {
                     detailsCard
                     if hasPopup {
                         popupButton
+                    }
+                    if hasOptions {
+                        optionsButton
+                    }
+                    if !hasPopup {
+                        actionButton
                     }
                     removeButton
                 }
@@ -418,6 +428,28 @@ struct ExtensionDetailView: View {
             Text("Open popup")
         }
         .buttonStyle(PrimaryButtonStyle())
+    }
+
+    private var optionsButton: some View {
+        Button {
+            model.openOptions(for: current)
+        } label: {
+            Text("Open options")
+        }
+        .buttonStyle(QuietButtonStyle())
+    }
+
+    private var actionButton: some View {
+        Button {
+            model.extensions.dispatchActionClick(for: current)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                Text("Trigger action")
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(QuietButtonStyle())
     }
 
     private var removeButton: some View {
@@ -672,6 +704,55 @@ struct ExtensionPopupView: View {
             .accessibilityLabel("Close popup")
         }
         .padding(16)
+    }
+}
+
+// MARK: - Options page
+
+struct ExtensionOptionsView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let record: InstalledExtension
+
+    @State private var webView: WKWebView?
+
+    var body: some View {
+        ZStack {
+            BrowserBackground()
+            VStack(spacing: 0) {
+                HStack {
+                    DiamondMark(size: 16)
+                    Text("\(record.displayName) options")
+                        .font(ChromexFont.headline)
+                        .foregroundStyle(ChromexColor.textPrimary)
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(ChromexColor.textTertiary)
+                    }
+                    .accessibilityLabel("Close options")
+                }
+                .padding(16)
+
+                if let webView {
+                    WebViewContainer(webView: webView)
+                } else {
+                    EmptyStateView(
+                        symbol: "gearshape",
+                        title: "No options page",
+                        message: "This extension does not declare an options page."
+                    )
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .onAppear {
+            if webView == nil {
+                webView = model.extensions.makeOptionsWebView(for: record)
+            }
+        }
     }
 }
 

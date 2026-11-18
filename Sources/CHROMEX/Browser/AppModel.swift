@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     @Published var selectedTabID: UUID?
     @Published var showingTabSwitcher = false
     @Published var popupExtension: InstalledExtension?
+    @Published var optionsExtension: InstalledExtension?
 
     // MARK: Library state
     @Published private(set) var bookmarks: [Bookmark] = []
@@ -454,6 +455,10 @@ final class AppModel: ObservableObject {
 
     func openPopup(for record: InstalledExtension) {
         popupExtension = record
+    }
+
+    func openOptions(for record: InstalledExtension) {
+        optionsExtension = record
     }
 
     // MARK: Privacy summary

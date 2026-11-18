@@ -57,12 +57,14 @@ Status reflects **code plus tests**, not a device run.
 | `chrome.tabs.query/create` | **Partial** | active tab only; URL gated by grants |
 | `chrome.scripting.executeScript` | **Unsupported** | reported by analyzer |
 | `chrome.action` badge | **Unsupported** | no badge surface |
+| `chrome.action.onClicked` | **Implemented, not executed** | Trigger action button |
+| `chrome.permissions.contains/getAll` | **Implemented, not executed** | granted-set checks |
 | `chrome.declarativeNetRequest` | **Unsupported per extension** | built-in blocker only |
 | `chrome.webRequest` | **Unsupported** | no WebKit hook |
 | `chrome.cookies` | **Unsupported** | not exposed |
-| `chrome.i18n` | **Unsupported** | `_locales` not resolved |
+| `chrome.i18n` | **Implemented, not executed** | `_locales` parser + unit tests |
 | `chrome.alarms` | **Unsupported** | no durable scheduler |
-| Extension options page | **Unsupported (not hosted)** | parsed but no UI |
+| Extension options page | **Implemented, not executed** | hosted in a sheet |
 | Extension identifiers | **N/A** | no app extensions; single bundle |
 
 ## 3. Security results
