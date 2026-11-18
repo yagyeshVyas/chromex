@@ -66,51 +66,70 @@ struct ExtensionLocalization: Sendable {
 
     func message(for key: String, substitutions: [String]) -> String? {
         guard let message = messages[key.lowercased()] else { return nil }
+        let text = message.text
         var result = ""
+        var index = text.startIndex
 
-        // Resolve $name$ placeholders to their content, substituting "$1" with
-        // the first argument, and keep unknown placeholders verbatim.
-        var index = message.text.startIndex
-        while index < message.text.endIndex {
-            let character = message.text[index]
-            if character == "$" {
-                let next = message.text.index(after: index)
-                if next < message.text.endIndex, message.text[next] == "$" {
-                    result.append("$")
-                    index = message.text.index(after: next)
-                    continue
-                }
-                if let closing = message.text[next...].firstIndex(of: "$") {
-                    let name = String(message.text[next..<closing]).lowercased()
-                    if let content = message.placeholders[name] {
-                        result += resolve(content, substitutions: substitutions)
-                    } else if let number = Int(name), number >= 1, number <= substitutions.count {
-                        result += substitutions[number - 1]
-                    } else {
-                        result += "$" + name + "$"
-                    }
-                    index = message.text.index(after: closing)
-                    continue
-                }
+        while index < text.endIndex {
+            let character = text[index]
+            guard character == "$" else {
+                result.append(character)
+                index = text.index(after: index)
+                continue
             }
-            result.append(character)
-            index = message.text.index(after: index)
+
+            let next = text.index(after: index)
+            guard next < text.endIndex else {
+                result.append("$")
+                break
+            }
+
+            if text[next] == "$" {
+                result.append("$")
+                index = text.index(after: next)
+                continue
+            }
+
+            // $1 … $9 direct substitution.
+            var digitsEnd = next
+            while digitsEnd < text.endIndex, text[digitsEnd].isNumber {
+                digitsEnd = text.index(after: digitsEnd)
+            }
+            if digitsEnd > next, let number = Int(text[next..<digitsEnd]) {
+                if number >= 1, number <= substitutions.count {
+                    result += substitutions[number - 1]
+                } else {
+                    result += "$" + String(number)
+                }
+                index = digitsEnd
+                continue
+            }
+
+            // $name$ placeholder.
+            if let closing = text[next...].firstIndex(of: "$") {
+                let name = String(text[next..<closing]).lowercased()
+                if let content = message.placeholders[name] {
+                    result += resolve(content, substitutions: substitutions)
+                } else {
+                    result += "$" + name + "$"
+                }
+                index = text.index(after: closing)
+                continue
+            }
+
+            result.append("$")
+            index = next
         }
 
         return result
     }
 
     private func resolve(_ content: String, substitutions: [String]) -> String {
-        if content.hasPrefix("$"), content.hasSuffix("$"), content.count > 2 {
-            let name = String(content.dropFirst().dropLast()).lowercased()
-            if let number = Int(name), number >= 1, number <= substitutions.count {
-                return substitutions[number - 1]
-            }
-            if let nested = messages[name] {
-                return nested.text
-            }
+        var candidate = content
+        if candidate.hasPrefix("$") {
+            candidate.removeFirst()
         }
-        if let number = Int(content), number >= 1, number <= substitutions.count {
+        if let number = Int(candidate), number >= 1, number <= substitutions.count {
             return substitutions[number - 1]
         }
         return content
