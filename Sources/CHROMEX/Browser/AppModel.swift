@@ -495,7 +495,11 @@ final class AppModel: ObservableObject {
         }
         let selected = min(max(0, index), tabs.count - 1)
         selectedTabID = tabs[selected].id
-        tabs[selected].ensureLoaded()
+        // Chrome restores every tab, not just the focused one. WebKit keeps a
+        // page suspended until it is shown, so loading them all is cheap.
+        for tab in tabs {
+            tab.ensureLoaded()
+        }
     }
 
     // MARK: Browsing data
@@ -549,20 +553,31 @@ final class AppModel: ObservableObject {
         closeTab(tab)
     }
 
-    func extensionEvaluateInTab(id: Int, script: String, inContentWorld: Bool, completion: @escaping (Any?) -> Void) {
-        guard let tab = tab(id: id) else {
+    func extensionEvaluateInTab(
+        id: Int,
+        script: String,
+        inContentWorld: Bool,
+        completion: @escaping (Any?) -> Void
+    ) {
+        guard let target = tab(id: id) else {
             completion(nil)
             return
         }
+        let box = SendableBox(completion)
         if inContentWorld {
-            tab.webView.evaluateJavaScript(script, in: nil, in: contentWorld) { result, error in
-                if let error { AppLog.write("scripting.executeScript failed: \(error.localizedDescription)", tag: "ext") }
-                completion(result)
+            target.webView.evaluateJavaScript(script, in: nil, in: contentWorld) { result in
+                switch result {
+                case .success(let value):
+                    box.value(value)
+                case .failure(let error):
+                    AppLog.write("scripting.executeScript failed: \(error.localizedDescription)", tag: "ext")
+                    box.value(nil)
+                }
             }
         } else {
-            tab.webView.evaluateJavaScript(script) { result, error in
+            target.webView.evaluateJavaScript(script) { result, error in
                 if let error { AppLog.write("scripting.executeScript failed: \(error.localizedDescription)", tag: "ext") }
-                completion(result)
+                box.value(result)
             }
         }
     }

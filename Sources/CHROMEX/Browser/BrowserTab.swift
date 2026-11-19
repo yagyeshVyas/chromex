@@ -41,10 +41,6 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/131.0.0.0 Safari/537.36"
 
-    private static let downloadableExtensions: Set<String> = [
-        "zip", "crx", "dmg", "pkg", "tar", "gz", "7z", "rar", "iso", "exe", "msi", "apk",
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "epub", "mp3", "mp4", "mov", "wav"
-    ]
 
     init(model: AppModel, isPrivate: Bool, desktopMode: Bool, configuration: WKWebViewConfiguration) {
         self.model = model
@@ -176,9 +172,6 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
         }
     }
 
-    private func isDownloadableFile(_ url: URL) -> Bool {
-        Self.downloadableExtensions.contains(url.pathExtension.lowercased())
-    }
 
     /// Chrome's shape for a failed navigation: a title, one sentence, the code.
     private func makePageError(_ error: Error) -> PageError {
@@ -344,7 +337,7 @@ extension BrowserTab: @preconcurrency WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
@@ -376,10 +369,11 @@ extension BrowserTab: @preconcurrency WKNavigationDelegate {
         }
 
         if scheme == "http" || scheme == "https" || scheme == "about" || scheme == "file" {
-            if navigationAction.navigationType == .linkActivated,
-               isDownloadableFile(url) {
-                decisionHandler(.download)
-                return
+            if navigationAction.targetFrame?.isMainFrame == true {
+                // Rebuild the injection set for this exact document, so a
+                // back/forward or same-tab navigation cannot keep scripts that
+                // were meant for the previous site.
+                model?.prepareContentScripts(for: self, url: url)
             }
             decisionHandler(.allow)
             return
@@ -399,7 +393,7 @@ extension BrowserTab: @preconcurrency WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         let response = navigationResponse.response
         if let http = response as? HTTPURLResponse {
@@ -433,7 +427,7 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
         requestMediaCapturePermissionFor origin: WKSecurityOrigin,
         initiatedByFrame frame: WKFrameInfo,
         type: WKMediaCaptureType,
-        decisionHandler: @escaping (WKPermissionDecision) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
     ) {
         let permissionType: SitePermissionType
         switch type {
@@ -486,11 +480,12 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
         return nil
     }
 
+    @available(iOS 18.4, *)
     func webView(
         _ webView: WKWebView,
         runOpenPanelWith parameters: WKOpenPanelParameters,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping ([URL]?) -> Void
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
         guard let presenter = model?.presentingViewController else {
             completionHandler(nil)
@@ -507,7 +502,7 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
     func webView(
         _ webView: WKWebView,
         contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
-        completionHandler: @escaping (UIContextMenuConfiguration?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (UIContextMenuConfiguration?) -> Void
     ) {
         let linkURL = elementInfo.linkURL
         let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
@@ -556,7 +551,7 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
         _ webView: WKWebView,
         runJavaScriptAlertPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping () -> Void
+        completionHandler: @escaping @MainActor @Sendable () -> Void
     ) {
         presentAlert(title: frame.request.url?.host ?? "Page", message: message, completion: completionHandler)
     }
@@ -565,7 +560,7 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
         _ webView: WKWebView,
         runJavaScriptConfirmPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping (Bool) -> Void
+        completionHandler: @escaping @MainActor @Sendable (Bool) -> Void
     ) {
         guard let presenter = model?.presentingViewController else {
             completionHandler(false)
@@ -582,7 +577,7 @@ extension BrowserTab: @preconcurrency WKUIDelegate {
         runJavaScriptTextInputPanelWithPrompt prompt: String,
         defaultText: String?,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping (String?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (String?) -> Void
     ) {
         guard let presenter = model?.presentingViewController else {
             completionHandler(nil)

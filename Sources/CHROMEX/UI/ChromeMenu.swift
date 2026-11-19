@@ -56,6 +56,7 @@ struct ChromeMenuView: View {
                         onPrint()
                     }
                     row("square.and.arrow.up", "Share") {
+                        dismiss()
                         onShare()
                     }
                     row(tab.isDesktopMode ? "iphone" : "desktopcomputer",

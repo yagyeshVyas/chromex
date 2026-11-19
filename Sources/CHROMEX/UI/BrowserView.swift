@@ -23,13 +23,11 @@ struct RootView: View {
 enum ChromeSheet: Identifiable {
     case menu
     case hub
-    case share(URL)
 
     var id: String {
         switch self {
         case .menu: return "menu"
         case .hub: return "hub"
-        case .share: return "share"
         }
     }
 }
@@ -120,6 +118,15 @@ struct BrowserView: View {
         .onChange(of: model.currentTab?.urlString ?? "") { _, _ in
             guard !omniboxFocused, let current = model.currentTab else { return }
             omniboxText = displayText(for: current.urlString)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    omniboxFieldFocused = false
+                    omniboxFocused = false
+                }
+            }
         }
     }
 
@@ -220,10 +227,15 @@ struct BrowserView: View {
                             showFind = true
                             findStatus = nil
                         },
-                        onPrint: { tab.printable() },
+                        onPrint: {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                tab.printable()
+                            }
+                        },
                         onShare: {
-                            if let url = URL(string: tab.urlString) {
-                                sheet = .share(url)
+                            guard let url = URL(string: tab.urlString) else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                ShareSheet.present(url: url)
                             }
                         },
                         onToggleDesktop: { tab.setDesktopMode(!tab.isDesktopMode) },
@@ -241,9 +253,6 @@ struct BrowserView: View {
             }
         case .hub:
             NavigationStack { HubView() }
-        case .share(let url):
-            ActivityView(activityItems: [url])
-                .presentationDetents([.medium, .large])
         }
     }
 
@@ -837,14 +846,39 @@ struct HomeView: View {
 
 // MARK: - Web view host
 
+final class WebHostView: UIView {
+    var hosted: WKWebView? {
+        didSet {
+            guard oldValue !== hosted else { return }
+            oldValue?.removeFromSuperview()
+            guard let hosted else { return }
+            hosted.frame = bounds
+            hosted.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            addSubview(hosted)
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        hosted?.frame = bounds
+    }
+}
+
 struct WebViewContainer: UIViewRepresentable {
     let webView: WKWebView
 
-    func makeUIView(context: Context) -> WKWebView {
-        webView
+    func makeUIView(context: Context) -> WebHostView {
+        let host = WebHostView()
+        host.backgroundColor = .clear
+        host.hosted = webView
+        return host
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WebHostView, context: Context) {
+        if uiView.hosted !== webView {
+            uiView.hosted = webView
+        }
+    }
 }
 
 // MARK: - Shared pieces used by other screens
@@ -862,6 +896,39 @@ struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// Presents the system share sheet without routing through a SwiftUI `.sheet`,
+/// which is unreliable while another sheet is still dismissing.
+@MainActor
+enum ShareSheet {
+    static func present(url: URL) {
+        guard let root = topViewController() else { return }
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = root.view
+            popover.sourceRect = CGRect(
+                x: root.view.bounds.midX,
+                y: root.view.bounds.midY,
+                width: 1,
+                height: 1
+            )
+        }
+        root.present(controller, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        guard let root = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController else { return nil }
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
+    }
 }
 
 struct DiamondMark: View {

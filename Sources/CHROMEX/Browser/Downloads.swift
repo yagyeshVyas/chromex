@@ -85,18 +85,16 @@ final class DownloadCenter: NSObject, @preconcurrency WKDownloadDelegate {
     func download(
         _ download: WKDownload,
         decideDestinationUsing response: URLResponse,
-        suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
-    ) {
+        suggestedFilename: String
+    ) async -> URL? {
         guard let destination = Self.uniqueDestination(filename: Self.safeFilename(suggestedFilename)) else {
-            completionHandler(nil)
-            return
+            return nil
         }
         if let id = itemIDs[ObjectIdentifier(download)] {
-            model?.renameDownload(id: id, filename: destination.lastPathComponent)
             destinations[ObjectIdentifier(download)] = destination
+            model?.renameDownload(id: id, filename: destination.lastPathComponent)
         }
-        completionHandler(destination)
+        return destination
     }
 
     func downloadDidFinish(_ download: WKDownload) {

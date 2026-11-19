@@ -211,9 +211,22 @@ final class ExtensionManager: ObservableObject {
         }
         installed = records
         for record in installed where record.isEnabled {
-            schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
+            let directory = root.appendingPathComponent(record.id, isDirectory: true)
+            schemeHandler.register(extensionID: record.id, directory: directory)
+            ensureBackgroundDocument(for: record, in: directory)
             scheduleRuntime(for: record)
         }
+    }
+
+    /// Background scripts run from a real document served by the scheme handler.
+    /// `loadHTMLString` gives the page a null origin, and subresource loads from a
+    /// custom scheme in a null-origin document are rejected by WebKit.
+    private func ensureBackgroundDocument(for record: InstalledExtension, in directory: URL) {
+        guard let manifest = record.manifest, manifest.backgroundPage == nil,
+              !manifest.backgroundScripts.isEmpty else { return }
+        let url = directory.appendingPathComponent("background.html")
+        let document = ExtensionShim.backgroundDocument(scriptPaths: manifest.backgroundScripts)
+        try? document.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func persist() {
@@ -254,6 +267,7 @@ final class ExtensionManager: ObservableObject {
         )
 
         schemeHandler.register(extensionID: identifier, directory: destination)
+        ensureBackgroundDocument(for: record, in: destination)
         warmScriptCache(extensionID: identifier, manifest: staged.manifest, directory: destination)
         installed.append(record)
         persist()
@@ -361,6 +375,7 @@ final class ExtensionManager: ObservableObject {
         configuration.userContentController.add(native, name: "chromexNative")
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
 
+        schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
         let webView = WKWebView(frame: .zero, configuration: configuration)
         let urlString = "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(popup)"
         if let url = URL(string: urlString) {
@@ -386,6 +401,7 @@ final class ExtensionManager: ObservableObject {
         configuration.userContentController.add(native, name: "chromexNative")
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
 
+        schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
         let webView = WKWebView(frame: .zero, configuration: configuration)
         if let url = URL(string: "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(options)") {
             webView.load(URLRequest(url: url))
@@ -652,14 +668,31 @@ final class ExtensionManager: ObservableObject {
             )
             let json = JSBridge.stringify(message)
             app?.extensionEvaluateInTab(id: tabID, script: "window.__chromexDispatch && window.__chromexDispatch(\(requestID), \(JSBridge.literal(json)));", inContentWorld: true) { result in
-                if (result as? String) == "__none__", let pending = self.pendingReplies.removeValue(forKey: requestID) {
+                let answered = (result as? String) == "__handled__"
+                if !answered, let pending = self.pendingReplies.removeValue(forKey: requestID) {
                     self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
                 }
             }
 
         case "scripting.executeScript":
-            handleExecuteScript(payload: payload, record: record, respond: respond)
-
+            let target = payload["target"] as? [String: Any] ?? [:]
+            let tabID = (target["tabId"] as? NSNumber)?.intValue ?? 0
+            let worldID = payload["worldId"] as? String ?? "ISOLATED"
+            let directory = root.appendingPathComponent(record.id, isDirectory: true)
+            var code = payload["code"] as? String
+            if code == nil, let function = payload["func"] as? String {
+                code = "(\(function))();"
+            }
+            if code == nil, let files = payload["files"] as? [String], let first = files.first {
+                code = readText(first, in: directory, extensionID: record.id)
+            }
+            guard let script = code else {
+                respond(nil, "scripting.executeScript needs files, code or func")
+                return
+            }
+            app?.extensionEvaluateInTab(id: tabID, script: script, inContentWorld: worldID != "MAIN") { result in
+                respond([["frameId": 0, "result": result ?? NSNull()]], nil)
+            }
         case "scripting.insertCSS":
             let css = payload["css"] as? String ?? ""
             let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
@@ -761,32 +794,6 @@ final class ExtensionManager: ObservableObject {
 
         default:
             respond(nil, "Unsupported API: \(api)")
-        }
-    }
-
-    private func handleExecuteScript(
-        payload: [String: Any],
-        record: InstalledExtension,
-        respond: @escaping (Any?, String?) -> Void
-    ) {
-        let tabID = ((payload["target"] as? [String: Any])?["tabId"] as? NSNumber)?.intValue ?? 0
-        let worldID = payload["worldId"] as? String ?? "ISOLATED"
-        let directory = root.appendingPathComponent(record.id, isDirectory: true)
-
-        var code = payload["code"] as? String
-        if code == nil, let function = payload["func"] as? String {
-            code = "(\(function))();"
-        }
-        if code == nil, let files = payload["files"] as? [String], let first = files.first {
-            code = readText(first, in: directory, extensionID: record.id)
-        }
-        guard let script = code else {
-            respond(nil, "scripting.executeScript needs files, code or func")
-            return
-        }
-
-        app?.extensionEvaluateInTab(id: tabID, script: script, inContentWorld: worldID != "MAIN") { result in
-            respond([["frameId": 0, "result": result ?? NSNull()]])
         }
     }
 
@@ -944,11 +951,12 @@ final class ExtensionManager: ObservableObject {
         let script = "window.__chromexReply(\(id), \(JSBridge.literal(json)), \(errorLiteral));"
 
         if context == "content" {
-            webView.evaluateJavaScript(script, in: frame, in: app?.contentWorld ?? .page) { [weak webView] _, failed in
-                guard failed != nil else { return }
+            let world = app?.contentWorld ?? .page
+            webView.evaluateJavaScript(script, in: frame, in: world) { [weak webView] result in
+                guard case .failure = result else { return }
                 // A stale frame snapshot fails; retry in the main frame so the
                 // caller still gets an answer instead of hanging.
-                webView?.evaluateJavaScript(script, in: nil, in: app?.contentWorld ?? .page, completionHandler: nil)
+                webView?.evaluateJavaScript(script, in: nil, in: world, completionHandler: nil)
             }
         } else {
             webView.evaluateJavaScript(script, completionHandler: nil)

@@ -232,12 +232,11 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         super.init()
         webView.navigationDelegate = self
 
-        let document = ExtensionShim.backgroundDocument(scriptPaths: manifest.backgroundScripts)
-        let base = URL(string: "\(ExtensionSchemeHandler.scheme)://\(extensionID)/background.html")
-        if let page = manifest.backgroundPage, let pageURL = URL(string: "\(ExtensionSchemeHandler.scheme)://\(extensionID)/\(page)") {
+        let backgroundPage = manifest.backgroundPage
+            ?? (manifest.backgroundScripts.isEmpty ? nil : "background.html")
+        if let backgroundPage,
+           let pageURL = URL(string: "\(ExtensionSchemeHandler.scheme)://\(extensionID)/\(backgroundPage)") {
             webView.load(URLRequest(url: pageURL))
-        } else if !manifest.backgroundScripts.isEmpty {
-            webView.loadHTMLString(document, baseURL: base)
         }
         _ = directory
         _ = token

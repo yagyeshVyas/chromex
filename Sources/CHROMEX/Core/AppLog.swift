@@ -53,3 +53,14 @@ enum AppLog {
         return text
     }
 }
+
+/// Carries a non-Sendable closure into a `@MainActor @Sendable` WebKit callback.
+/// WebKit hands results back on the main thread, so the box never crosses actors;
+/// it only satisfies the compiler's capture rule.
+final class SendableBox<T>: @unchecked Sendable {
+    let value: T
+
+    init(_ value: T) {
+        self.value = value
+    }
+}
