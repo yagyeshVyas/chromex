@@ -243,6 +243,198 @@ enum ExtensionShim {
           } catch (error) {}
 
           // ---------------------------------------------------------------
+          // Chrome host-permission networking
+          //
+          // Extension pages in Chrome are not subject to CORS for hosts they
+          // were granted. A WebKit page is, so absolute http(s) requests are
+          // routed through native URLSession, gated by the same grant list.
+          // ---------------------------------------------------------------
+
+          function chromeBase64ToBytes(b64) {
+            var binary = atob(b64 || "");
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+            return bytes;
+          }
+
+          function chromeBytesToBase64(bytes) {
+            var binary = "";
+            for (var i = 0; i < bytes.length; i++) { binary += String.fromCharCode(bytes[i]); }
+            return btoa(binary);
+          }
+
+          function chromeTextToBase64(text) {
+            return chromeBytesToBase64(new TextEncoder().encode(text));
+          }
+
+          function chromeIsAbsoluteHttp(url) {
+            return /^https?:\/\//i.test(String(url || ""));
+          }
+
+          function chromeNativeFetch(url, init) {
+            init = init || {};
+            var headers = {};
+            if (init.headers) {
+              if (typeof init.headers.forEach === "function" && !Array.isArray(init.headers)) {
+                init.headers.forEach(function (value, key) { headers[key] = value; });
+              } else if (Array.isArray(init.headers)) {
+                init.headers.forEach(function (pair) { headers[pair[0]] = pair[1]; });
+              } else {
+                Object.keys(init.headers).forEach(function (key) { headers[key] = init.headers[key]; });
+              }
+            }
+
+            var bodyPromise = Promise.resolve(null);
+            if (init.body != null) {
+              if (typeof init.body === "string") {
+                bodyPromise = Promise.resolve(chromeTextToBase64(init.body));
+              } else if (init.body instanceof Blob) {
+                bodyPromise = new Promise(function (resolve) {
+                  var reader = new FileReader();
+                  reader.onload = function () { resolve(String(reader.result).split(",")[1] || ""); };
+                  reader.readAsDataURL(init.body);
+                });
+              } else if (init.body instanceof ArrayBuffer) {
+                bodyPromise = Promise.resolve(chromeBytesToBase64(new Uint8Array(init.body)));
+              } else if (ArrayBuffer.isView(init.body)) {
+                bodyPromise = Promise.resolve(chromeBytesToBase64(new Uint8Array(
+                  init.body.buffer, init.body.byteOffset, init.body.byteLength
+                )));
+              } else {
+                bodyPromise = Promise.resolve(chromeTextToBase64(String(init.body)));
+              }
+            }
+
+            return bodyPromise.then(function (bodyBase64) {
+              return new Promise(function (resolve, reject) {
+                post("network.fetch", {
+                  url: url,
+                  method: (init.method || "GET").toUpperCase(),
+                  headers: headers,
+                  body: bodyBase64
+                }, function (value, errorMessage) {
+                  if (errorMessage) {
+                    reject(new TypeError(errorMessage));
+                    return;
+                  }
+                  var responseHeaders = new Headers();
+                  Object.keys(value.headers || {}).forEach(function (key) {
+                    try { responseHeaders.append(key, value.headers[key]); } catch (error) {}
+                  });
+                  var body = chromeBase64ToBytes(value.body || "");
+                  resolve(new Response(body, {
+                    status: value.status || 200,
+                    statusText: "",
+                    headers: responseHeaders
+                  }));
+                });
+              });
+            });
+          }
+
+          if (typeof window.fetch === "function") {
+            var chromeOriginalFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+              var url = typeof input === "string" ? input : (input && input.url);
+              if (!chromeIsAbsoluteHttp(url)) {
+                return chromeOriginalFetch(input, init);
+              }
+              return chromeNativeFetch(url, init);
+            };
+          }
+
+          if (typeof window.XMLHttpRequest === "function") {
+            var ChromeXHR = function () {
+              this.readyState = 0;
+              this.status = 0;
+              this.statusText = "";
+              this.responseText = "";
+              this.response = "";
+              this.responseType = "";
+              this.onreadystatechange = null;
+              this.onload = null;
+              this.onerror = null;
+              this._headers = {};
+              this._url = "";
+              this._method = "GET";
+              this._native = null;
+            };
+            ChromeXHR.prototype.open = function (method, url) {
+              this._method = method || "GET";
+              this._url = url;
+              this.readyState = 1;
+              if (this.onreadystatechange) { try { this.onreadystatechange(); } catch (error) {} }
+            };
+            ChromeXHR.prototype.setRequestHeader = function (key, value) {
+              this._headers[key] = value;
+            };
+            ChromeXHR.prototype.getAllResponseHeaders = function () {
+              var self = this;
+              return Object.keys(this._responseHeaders || {}).map(function (key) {
+                return key + ": " + self._responseHeaders[key];
+              }).join("\r\n");
+            };
+            ChromeXHR.prototype.getResponseHeader = function (key) {
+              var headers = this._responseHeaders || {};
+              var found = Object.keys(headers).filter(function (name) {
+                return name.toLowerCase() === String(key).toLowerCase();
+              })[0];
+              return found ? headers[found] : null;
+            };
+            ChromeXHR.prototype.abort = function () {
+              this._native = null;
+            };
+            ChromeXHR.prototype.send = function (body) {
+              var self = this;
+              var init = { method: this._method, headers: this._headers, body: body };
+              chromeNativeFetch(this._url, init).then(function (response) {
+                return response.text().then(function (text) {
+                  self.status = response.status;
+                  self.statusText = response.statusText;
+                  self._responseHeaders = {};
+                  response.headers.forEach(function (value, key) { self._responseHeaders[key] = value; });
+                  self.responseText = text;
+                  self.response = text;
+                  self.readyState = 4;
+                  if (self.onreadystatechange) { try { self.onreadystatechange(); } catch (error) {} }
+                  if (self.onload) { try { self.onload(); } catch (error) {} }
+                });
+              }).catch(function (error) {
+                self.readyState = 4;
+                self.status = 0;
+                if (self.onerror) { try { self.onerror(error); } catch (caught) {} }
+                if (self.onreadystatechange) { try { self.onreadystatechange(); } catch (caught) {} }
+              });
+            };
+            window.XMLHttpRequest = ChromeXHR;
+          }
+
+          // Extension pages are designed for Chrome's popup window, not a phone.
+          // If the page is wider than the WebKit viewport, widen the layout
+          // viewport so WebKit scales the whole UI to fit instead of clipping it.
+          if (CONTEXT === "popup" || CONTEXT === "options") {
+            var fitOnce = function () {
+              try {
+                var doc = document.documentElement;
+                var overflow = doc.scrollWidth - window.innerWidth;
+                if (overflow <= 8) { return; }
+                if (sessionStorage.getItem("chromex-fitted") === "1") { return; }
+                sessionStorage.setItem("chromex-fitted", "1");
+                var width = Math.min(1200, Math.max(doc.scrollWidth, window.innerWidth));
+                var meta = document.querySelector('meta[name="viewport"]');
+                if (!meta) {
+                  meta = document.createElement("meta");
+                  meta.name = "viewport";
+                  document.head.appendChild(meta);
+                }
+                meta.setAttribute("content", "width=" + width + ", initial-scale=1");
+                window.location.reload();
+              } catch (error) {}
+            };
+            window.addEventListener("load", function () { window.setTimeout(fitOnce, 120); });
+          }
+
+          // ---------------------------------------------------------------
           // chrome.*
           // ---------------------------------------------------------------
 
@@ -650,7 +842,11 @@ enum ExtensionShim {
 
           if (CONTEXT !== "content") {
             window.addEventListener("error", function (event) {
-              report((event.message || "script error") + " @ " + (event.filename || "") + ":" + (event.lineno || 0));
+              var target = event.target;
+              var where = (target && target !== window)
+                ? (target.src || target.href || target.localName || "")
+                : "";
+              report((event.message || "script error") + " @ " + (event.filename || where || "") + ":" + (event.lineno || 0));
             }, true);
             window.addEventListener("unhandledrejection", function (event) {
               report("unhandled rejection: " + String(event.reason));
@@ -664,6 +860,21 @@ enum ExtensionShim {
               } catch (error) {}
               if (originalError) { originalError.apply(console, arguments); }
             };
+
+            if (CONTEXT === "popup" || CONTEXT === "options") {
+              window.setTimeout(function () {
+                try {
+                  var app = document.getElementById("app");
+                  if (app && app.childElementCount === 0) {
+                    report("extension page booted empty: #app has no children (readyState " + document.readyState + ")");
+                  } else if (app) {
+                    report("extension page rendered " + app.childElementCount + " node(s)");
+                  } else {
+                    report("extension page has no #app element (readyState " + document.readyState + ")");
+                  }
+                } catch (error) {}
+              }, 2500);
+            }
           }
         })();
         """#

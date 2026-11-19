@@ -255,12 +255,21 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
 
         let backgroundPage = manifest.backgroundPage
             ?? (manifest.backgroundScripts.isEmpty ? nil : "background.html")
-        if let backgroundPage,
-           let pageURL = URL(string: "\(ExtensionSchemeHandler.scheme)://\(extensionID)/\(backgroundPage)") {
-            webView.load(URLRequest(url: pageURL))
+        if let backgroundPage {
+            backgroundURL = URL(string: "\(ExtensionSchemeHandler.scheme)://\(extensionID)/\(backgroundPage)")
         }
         _ = directory
         _ = token
+        loadBackground()
+    }
+
+    private var backgroundURL: URL?
+    private var loadAttempts = 0
+
+    private func loadBackground() {
+        guard let backgroundURL, loadAttempts < 4 else { return }
+        loadAttempts += 1
+        webView.load(URLRequest(url: backgroundURL))
     }
 
     func dispatch(requestID: Int, payloadJSON: String, completion: @escaping (String?) -> Void) {
@@ -319,11 +328,17 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        AppLog.write("background load failed: \(error.localizedDescription)", tag: "ext")
+        AppLog.write("background load failed (\(extensionID)): \(error.localizedDescription)", tag: "ext")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        AppLog.write("background load failed: \(error.localizedDescription)", tag: "ext")
+        AppLog.write("background load failed (\(extensionID)) attempt \(loadAttempts): \(error.localizedDescription)", tag: "ext")
+        // WebKit can cancel the very first custom-scheme load while the app is
+        // still coming up. Retry a few times before declaring the worker dead.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            self?.loadBackground()
+        }
     }
 
     func stop() {

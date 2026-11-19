@@ -567,6 +567,11 @@ final class ExtensionManager: ObservableObject {
         return patterns.contains { record.grants.contains($0) }
     }
 
+    private func isGranted(record: InstalledExtension, url: URL) -> Bool {
+        if record.grants.contains("<all_urls>") { return true }
+        return record.grants.contains { HostMatcher.matches(pattern: $0, url: url) }
+    }
+
     // MARK: Navigation events
 
     func navigationDidFinish(urlString: String, isPrivate: Bool) {
@@ -675,6 +680,9 @@ final class ExtensionManager: ObservableObject {
                     self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
                 }
             }
+
+        case "network.fetch":
+            handleNetworkFetch(payload: payload, record: record, respond: respond)
 
         case "scripting.executeScript":
             let target = payload["target"] as? [String: Any] ?? [:]
@@ -797,6 +805,67 @@ final class ExtensionManager: ObservableObject {
         default:
             respond(nil, "Unsupported API: \(api)")
         }
+    }
+
+    /// Extension pages get Chrome's host-permission privilege: requests to granted
+    /// hosts go through native `URLSession`, so they are not blocked by CORS the way
+    /// a normal web page would be.
+    private func handleNetworkFetch(
+        payload: [String: Any],
+        record: InstalledExtension,
+        respond: @escaping (Any?, String?) -> Void
+    ) {
+        guard let urlString = payload["url"] as? String,
+              let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            respond(nil, "network.fetch expects an http(s) url")
+            return
+        }
+        guard isGranted(record: record, url: url) else {
+            respond(nil, "network.fetch: this extension has no access to \(url.host ?? urlString)")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = (payload["method"] as? String ?? "GET").uppercased()
+        request.timeoutInterval = 60
+        if let headers = payload["headers"] as? [String: String] {
+            for (key, value) in headers where !key.isEmpty {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        if let body = payload["body"] as? String, !body.isEmpty, let data = Data(base64Encoded: body) {
+            request.httpBody = data
+            if request.value(forHTTPHeaderField: "Content-Type") == nil {
+                request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            }
+        }
+
+        let box = SendableBox(respond)
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            let http = response as? HTTPURLResponse
+            var headerFields: [String: String] = [:]
+            for (key, value) in http?.allHeaderFields ?? [:] {
+                headerFields[String(describing: key)] = String(describing: value)
+            }
+            let status = http?.statusCode ?? 0
+            let encoded = (data ?? Data()).base64EncodedString()
+            let finalURL = http?.url?.absoluteString ?? urlString
+            let failure = error?.localizedDescription
+            Task { @MainActor in
+                if let failure {
+                    box.value(nil, failure)
+                    return
+                }
+                box.value([
+                    "status": status,
+                    "headers": headerFields,
+                    "body": encoded,
+                    "url": finalURL
+                ], nil)
+            }
+        }.resume()
     }
 
     private func tabsPayload(matching query: [String: Any], record: InstalledExtension) -> [[String: Any]] {

@@ -781,7 +781,7 @@ struct ExtensionPopupView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .onAppear {
             if webView == nil {
                 webView = model.extensions.makePopupWebView(for: record)
