@@ -5,7 +5,7 @@ import UserNotifications
 ///
 /// WebKit gives an app no system surface by itself; UserNotifications is the
 /// only sanctioned one, and it works in the foreground when a delegate opts in.
-final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
+final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationPresenter()
 
     func install() {

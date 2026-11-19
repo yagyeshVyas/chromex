@@ -507,13 +507,18 @@ final class ExtensionManager: ObservableObject {
             forIdentifier: identifier,
             encodedContentRuleList: encoded
         ) { list, error in
+            let boxed = list.map { SendableBox($0) }
+            let failure = error?.localizedDescription
+            let displayName = record.displayName
+            let recordID = record.id
+            let ruleCount = compiled.count
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if let list {
-                    self.extensionRuleLists[record.id] = [list]
-                    AppLog.write("extension rules compiled: \(record.displayName) (\(compiled.count))", tag: "ext")
+                if let boxed {
+                    self.extensionRuleLists[recordID] = [boxed.value]
+                    AppLog.write("extension rules compiled: \(displayName) (\(ruleCount))", tag: "ext")
                 } else {
-                    AppLog.write("extension rules rejected: \(record.displayName) — \(error?.localizedDescription ?? "unknown")", tag: "ext")
+                    AppLog.write("extension rules rejected: \(displayName) — \(failure ?? "unknown")", tag: "ext")
                 }
             }
         }
@@ -1117,7 +1122,7 @@ final class ExtensionManager: ObservableObject {
                 Task { @MainActor in
                     for cookie in boxed.value where cookie.name == name
                         && Self.cookieMatches(cookie, host: host, domain: domain) {
-                        store.deleteCookie(cookie, completionHandler: nil)
+                        store.delete(cookie, completionHandler: nil)
                     }
                     box.value(removal.value, nil)
                 }
