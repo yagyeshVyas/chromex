@@ -346,3 +346,69 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         webView.loadHTMLString("<!doctype html><html><body></body></html>", baseURL: nil)
     }
 }
+
+
+// MARK: - Offscreen document host
+
+/// A hidden extension page created by `chrome.offscreen.createDocument`.
+///
+/// Extensions use it for DOM work their service worker cannot do (clipboard,
+/// audio, canvas). It is a real extension context: same shim, same bridge, same
+/// storage, and it can message the background page.
+@MainActor
+final class ExtensionOffscreenRuntime: NSObject, @preconcurrency WKNavigationDelegate {
+    let extensionID: String
+    private let webView: WKWebView
+    private(set) var isReady = false
+    var onReady: (() -> Void)?
+
+    init(
+        extensionID: String,
+        url: URL,
+        schemeHandler: ExtensionSchemeHandler,
+        bridge: ExtensionBridge,
+        nativeBridge: NativeBridge,
+        shim: String
+    ) {
+        self.extensionID = extensionID
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(schemeHandler, forURLScheme: ExtensionSchemeHandler.scheme)
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+        configuration.userContentController.add(bridge, name: "chromexBridge")
+        configuration.userContentController.add(nativeBridge, name: "chromexNative")
+        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
+        webView.navigationDelegate = self
+        webView.load(URLRequest(url: url))
+    }
+
+    func evaluate(_ script: String) {
+        guard isReady else { return }
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    func dispatch(_ payloadJSON: String, completion: @escaping (String?) -> Void) {
+        let script = "window.__chromexDispatch(0, \(JSBridge.literal(payloadJSON)));"
+        webView.evaluateJavaScript(script) { result, _ in
+            let value = result as? String
+            Task { @MainActor in completion(value) }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isReady = true
+        onReady?()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        AppLog.write("offscreen document failed (\(extensionID)): \(error.localizedDescription)", tag: "ext")
+    }
+
+    func stop() {
+        webView.stopLoading()
+        webView.loadHTMLString("<!doctype html><html></html>", baseURL: nil)
+    }
+}

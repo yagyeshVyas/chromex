@@ -477,7 +477,7 @@ final class ExtensionManager: ObservableObject {
         respond: @escaping (Any?, String?) -> Void
     ) {
         if offscreens[record.id] != nil {
-            respond([:])
+            respond([:], nil)
             return
         }
         let requested = payload["url"] as? String
@@ -503,7 +503,7 @@ final class ExtensionManager: ObservableObject {
         )
         offscreens[record.id] = runtime
         AppLog.write("\(record.displayName): offscreen document \(documentPath)", tag: "ext")
-        respond([:])
+        respond([:], nil)
     }
 
     private func stopOffscreenDocument(for identifier: String) {

@@ -1135,11 +1135,25 @@ enum ExtensionShim {
               var where = (target && target !== window)
                 ? (target.src || target.href || target.localName || "")
                 : "";
-              report((event.message || "script error") + " @ " + (event.filename || where || "") + ":" + (event.lineno || 0));
+              var detail = event.message || "script error";
+              if (event.error && event.error.stack) {
+                detail += " | stack: " + String(event.error.stack).replace(/\n/g, " <- ");
+              }
+              report(detail + " @ " + (event.filename || where || "") + ":" + (event.lineno || 0) + ":" + (event.colno || 0));
             }, true);
             window.addEventListener("unhandledrejection", function (event) {
               report("unhandled rejection: " + String(event.reason && event.reason.stack ? event.reason.stack : event.reason));
             });
+            var originalWarn = console.warn;
+            console.warn = function () {
+              try {
+                var warningParts = [];
+                for (var w = 0; w < arguments.length; w++) { warningParts.push(String(arguments[w])); }
+                report("warn: " + warningParts.join(" "));
+              } catch (error) {}
+              if (originalWarn) { originalWarn.apply(console, arguments); }
+            };
+
             var originalError = console.error;
             console.error = function () {
               try {
