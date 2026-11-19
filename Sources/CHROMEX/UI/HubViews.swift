@@ -32,15 +32,40 @@ struct HubView: View {
     var body: some View {
         ZStack {
             BrowserBackground()
-            if model.extensions.installed.isEmpty {
-                emptyState
-            } else {
-                extensionList
+            VStack(spacing: 0) {
+                hubHeader
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if model.extensions.installed.isEmpty {
+                            emptyState
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            ForEach(model.extensions.installed) { record in
+                                NavigationLink {
+                                    ExtensionDetailView(record: record)
+                                } label: {
+                                    ExtensionHubCard(
+                                        record: record,
+                                        storageBytes: model.extensions.storageByteCount(for: record)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            diagnosticsCard
+                        }
+                        Text("CHROMEX runs a documented subset of Chrome extension APIs. Every package is analysed before install; the detail screen lists what will not work.")
+                            .font(ChromexFont.caption)
+                            .foregroundStyle(ChromexColor.textTertiary)
+                            .padding(.top, 4)
+                    }
+                    .padding(20)
+                }
             }
             if isImporting {
                 importingOverlay
             }
         }
+        .presentationBackground(ChromexColor.background)
         .navigationTitle("Chromex Hub")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -85,47 +110,60 @@ struct HubView: View {
         )
     }
 
-    private var extensionList: some View {
-        List {
-            diagnosticsSection
-            installedSection
+    private var hubHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            DiamondMark(size: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Chromex Hub")
+                    .font(ChromexFont.title)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                Text("\(model.extensions.installed.count) installed · \(model.extensions.installed.filter(\.isEnabled).count) active")
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+            }
+            Spacer()
+            Button {
+                showingImporter = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(ChromexColor.electricBlue, in: Circle())
+            }
+            .accessibilityLabel("Import extension")
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .background(ChromexColor.surface.opacity(0.6))
     }
 
     @ViewBuilder
-    private var diagnosticsSection: some View {
+    private var diagnosticsCard: some View {
         if !model.extensions.diagnostics.isEmpty {
-            Section {
-                NavigationLink {
-                    DiagnosticsView()
-                } label: {
-                    Label("Diagnostics", systemImage: "stethoscope")
+            NavigationLink {
+                DiagnosticsView()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "stethoscope")
+                        .foregroundStyle(ChromexColor.warning)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Runtime diagnostics")
+                            .font(ChromexFont.headline)
+                            .foregroundStyle(ChromexColor.textPrimary)
+                        Text("\(model.extensions.diagnostics.count) message(s) from background pages")
+                            .font(ChromexFont.caption)
+                            .foregroundStyle(ChromexColor.textTertiary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ChromexColor.textTertiary)
                 }
-            } header: {
-                Text("Runtime")
+                .cardStyle()
             }
-        }
-    }
-
-    private var installedSection: some View {
-        Section {
-            ForEach(model.extensions.installed) { record in
-                NavigationLink {
-                    ExtensionDetailView(record: record)
-                } label: {
-                    ExtensionRow(
-                        record: record,
-                        storageBytes: model.extensions.storageByteCount(for: record)
-                    )
-                }
-            }
-        } header: {
-            SectionHeader(title: "Installed", trailing: "\(model.extensions.installed.count)")
-        } footer: {
-            Text("CHROMEX runs a documented subset of the Chrome extension APIs. Every extension is analysed before install and limitations are listed on its detail screen.")
-                .font(ChromexFont.caption)
+            .buttonStyle(.plain)
         }
     }
 
@@ -171,6 +209,54 @@ struct HubView: View {
             }
             isImporting = false
         }
+    }
+}
+
+struct ExtensionHubCard: View {
+    let record: InstalledExtension
+    let storageBytes: Int
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(ChromexColor.surfaceRaised)
+                DiamondMark(size: 20)
+            }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(record.displayName)
+                    .font(ChromexFont.headline)
+                    .foregroundStyle(ChromexColor.textPrimary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(ChromexFont.caption)
+                    .foregroundStyle(ChromexColor.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                StateDot(kind: record.isEnabled ? .active : .idle)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ChromexColor.textTertiary)
+            }
+        }
+        .padding(14)
+        .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(ChromexColor.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private var subtitle: String {
+        var parts = ["v\(record.version)", record.report.verdict.title]
+        if storageBytes > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(storageBytes), countStyle: .file))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
