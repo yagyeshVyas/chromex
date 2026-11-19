@@ -77,9 +77,13 @@ Detailed build steps, the optional CI lane, and how to change the bundle identif
 | Extension compatibility analysis before install | Working |
 | Content scripts (JS + CSS, `run_at`, frames) | Working |
 | Extension popups | Working |
+| Extension options pages | Working — hosted in a sheet from the detail screen |
+| `chrome.i18n` (`_locales`, placeholders) | Working |
+| `chrome.permissions.contains/getAll` | Working |
+| `chrome.action.onClicked` (no popup) | Working — via **Trigger action** |
 | `storage.local`, runtime messaging, `tabs.query/create` | Working (documented subset) |
 | Extension background pages (non-persistent) | Working while the app runs |
-| `webRequest`, `declarativeNetRequest`, cookies, alarms, i18n | Not supported â€” see the matrix |
+| `webRequest`, `declarativeNetRequest`, cookies, alarms | Not supported â€” see the matrix |
 | Reader mode | Not in this build |
 | Extension options pages | Not hosted in this build |
 | CRX signature verification | Not performed (no trust anchor) â€” labelled as such |
@@ -140,17 +144,17 @@ interception primitive iOS provides.
 | Area | Status |
 |---|---|
 | Swift compilation for iOS | **Pass** — Xcode 16.4, CI run 43089913502 |
-| Automated tests | **57/57 pass** on simulator; 35/35 Linux QA checks |
-| Unsigned IPA | **Built and verified** — `dist/CHROMEX-unsigned.ipa`, SHA-256 in `dist/SHA256SUMS.txt` |
+| Automated tests | **64/64 pass** on simulator; 35/35 Linux QA checks |
+| Unsigned IPA | **Released v1.1.0** — [GitHub release](https://github.com/yagyeshVyas/chromex/releases/tag/v1.1.0), SHA-256 `d74f46f9…ac11425f`, copy in `dist/` |
 | xtool build | **Blocked** — Darwin Swift SDK not installed (`xtool sdk install <Xcode.xip>`) |
 | iPhone from WSL | **Blocked** — Windows sees it; WSL needs `usbipd` passthrough and `usbmuxd` |
-| Device installation | **Pass** — signed locally with existing assets, installed via `pymobiledevice3`, launched (PID alive, no crash log) |
+| Device installation | **Pending** — v1.1.0 is signed locally; the iPhone was disconnected at install time. Plug it in and run `python -m pymobiledevice3 apps install dist\CHROMEX-signed.ipa` |
 | Browser/extension runtime testing | **Not run** — app launches, but UI interaction was not exercised |
 
 ## Known issues
 
 - Extension options pages are not hosted; CRX signatures are not verified.
-- `webRequest`, cookies, alarms, i18n and per-extension DNR are unsupported and reported before install.
+- `webRequest`, cookies, alarms and per-extension DNR are unsupported and reported before install.
 - Background execution stops when the app is suspended.
 - Content-script sources are cached at install; removing an extension clears its cache.
 - No screenshots have been captured.

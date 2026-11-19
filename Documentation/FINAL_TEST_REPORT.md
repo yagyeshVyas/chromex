@@ -89,3 +89,15 @@ bash Scripts/verify_ipa.sh dist/CHROMEX-unsigned.ipa
 
 Once a signed build exists, the device checklist in `RELEASE.md` §7 is the next test pass; results
 should be appended here rather than assumed.
+
+---
+
+## 7. Update — 2026-11-19 (v1.1.0)
+
+- **64 XCTest cases pass** (added `LocalizationTests` for `_locales`, placeholders and
+  `default_locale`; added an unreadable-source regression test).
+- Extension runtime gained `chrome.i18n`, `chrome.permissions.contains/getAll`, options-page
+  hosting and `chrome.action.onClicked`.
+- Unsigned IPA published as GitHub release **v1.1.0** (SHA-256 `d74f46f9…ac11425f`).
+- Device install of v1.1.0 is **pending**: the iPhone was disconnected (`usbmux` returned an
+  empty list), so the signed build was produced but not installed.
