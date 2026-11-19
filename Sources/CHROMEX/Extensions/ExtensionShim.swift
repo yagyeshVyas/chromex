@@ -514,6 +514,12 @@ enum ExtensionShim {
           chrome.runtime.getBackgroundPage = function (callback) {
             if (callback) { callback(window); }
           };
+          chrome.runtime.getContexts = function (filter, callback) {
+            return withCallback(Promise.resolve([]), callback);
+          };
+          chrome.runtime.getPackageDirectoryEntry = function (callback) {
+            if (callback) { callback(null); }
+          };
           chrome.runtime.sendMessage = function (a, b, c, d) {
             var message, callback;
             if (typeof a === "string") {
@@ -664,6 +670,20 @@ enum ExtensionShim {
               files: injection && injection.files
             }), callback);
           };
+          chrome.scripting.registerContentScripts = function (scripts, callback) {
+            return withCallback(Promise.resolve(), callback);
+          };
+          chrome.scripting.getRegisteredContentScripts = function (filter, callback) {
+            if (typeof filter === "function") { callback = filter; }
+            return withCallback(Promise.resolve([]), callback);
+          };
+          chrome.scripting.updateContentScripts = function (scripts, callback) {
+            return withCallback(Promise.resolve(), callback);
+          };
+          chrome.scripting.unregisterContentScripts = function (filter, callback) {
+            if (typeof filter === "function") { callback = filter; }
+            return withCallback(Promise.resolve(), callback);
+          };
 
           chrome.i18n = chrome.i18n || {};
           chrome.i18n.getMessage = function (name, substitutions, callback) {
@@ -771,6 +791,10 @@ enum ExtensionShim {
           chrome.webRequest.onResponseStarted = makeEvent([]);
           chrome.webRequest.onCompleted = observedWebRequestEvent(makeEvent([]), "onCompleted");
           chrome.webRequest.onErrorOccurred = observedWebRequestEvent(makeEvent([]), "onErrorOccurred");
+          chrome.webRequest.onAuthRequired = observedWebRequestEvent(makeEvent([]), "onAuthRequired");
+          chrome.webRequest.onBeforeRedirect = observedWebRequestEvent(makeEvent([]), "onBeforeRedirect");
+          chrome.webRequest.onResponseStarted = observedWebRequestEvent(makeEvent([]), "onResponseStarted");
+          chrome.webRequest.onSendHeaders = observedWebRequestEvent(makeEvent([]), "onSendHeaders");
           chrome.webRequest.handlerBehaviorChanged = function (callback) { if (callback) { callback(); } };
 
           chrome.declarativeNetRequest = chrome.declarativeNetRequest || {};
@@ -788,6 +812,33 @@ enum ExtensionShim {
           };
           chrome.declarativeNetRequest.isRegexSupported = function (query, callback) {
             withCallback(Promise.resolve({ isSupported: false }), callback);
+          };
+          chrome.declarativeNetRequest.getEnabledRulesets = function (callback) {
+            return withCallback(Promise.resolve([]), callback);
+          };
+          chrome.declarativeNetRequest.updateEnabledRulesets = function (options, callback) {
+            return withCallback(Promise.resolve(), callback);
+          };
+          chrome.declarativeNetRequest.getAvailableStaticRuleCount = function (callback) {
+            return withCallback(Promise.resolve(0), callback);
+          };
+          chrome.declarativeNetRequest.testMatchOutcome = function (request, callback) {
+            return withCallback(Promise.resolve({ matchedRules: [] }), callback);
+          };
+          chrome.declarativeNetRequest.getMatchedRules = function (filter, callback) {
+            if (typeof filter === "function") { callback = filter; }
+            return withCallback(Promise.resolve({ rulesMatchedInfo: [] }), callback);
+          };
+          chrome.declarativeNetRequest.onRuleMatchedDebug = makeEvent([]);
+          chrome.declarativeNetRequestWithHostAccess = chrome.declarativeNetRequest;
+
+          chrome.tabs.discard = function (tabID, callback) {
+            return withCallback(Promise.resolve(), callback);
+          };
+          chrome.tabs.getCurrent = function (callback) {
+            return withCallback(chrome.tabs.query({ active: true }).then(function (tabs) {
+              return tabs[0];
+            }), callback);
           };
 
           chrome.offscreen = chrome.offscreen || {};
