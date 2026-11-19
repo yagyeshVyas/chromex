@@ -107,3 +107,24 @@ python -m pymobiledevice3 apps uninstall app.mountain3690.pegasus6317
 
 The signed IPA (`dist/CHROMEX-signed.ipa`) is local only and is intentionally not published; the
 public artifact remains `dist/CHROMEX-unsigned.ipa`.
+
+---
+
+## 7. v1.1.0 install — 2026-11-19
+
+The phone reconnected and the release build was installed and verified:
+
+| Check | Result |
+|---|---|
+| Device | `Mafia`, iPhone16,2, iOS 27.2 |
+| Installed version | **1.1.0**, bundleVersion **31**, minimum iOS 17.0 |
+| Installation | `Installation succeed.` |
+| Launch | processIdentifier **96792** |
+| Alive after 6 s | yes (`list-processes`) |
+| Crash reports | none for CHROMEX |
+| Screenshot | `screenshots/chromex-v110.png`, 1290×2796 |
+| Visual inspection | **not possible in this session** (no image input) |
+
+The one-command installer `Scripts/install-to-iphone.ps1` is now the supported path. It waits
+for the device, signs if needed, installs, launches and verifies. Its earlier failure was a
+PowerShell 5.1 quirk (native stderr treated as a terminating error) and is fixed.

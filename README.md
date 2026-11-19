@@ -148,7 +148,7 @@ interception primitive iOS provides.
 | Unsigned IPA | **Released v1.1.0** — [GitHub release](https://github.com/yagyeshVyas/chromex/releases/tag/v1.1.0), SHA-256 `d74f46f9…ac11425f`, copy in `dist/` |
 | xtool build | **Blocked** — Darwin Swift SDK not installed (`xtool sdk install <Xcode.xip>`) |
 | iPhone from WSL | **Blocked** — Windows sees it; WSL needs `usbipd` passthrough and `usbmuxd` |
-| Device installation | **Pending** — v1.1.0 is signed locally; the iPhone was disconnected at install time. Plug it in and run `python -m pymobiledevice3 apps install dist\CHROMEX-signed.ipa` |
+| Device installation | **Pass** — v1.1.0 (build 31) installed on iPhone16,2 / iOS 27.2 on 2026-11-19; launched (PID 96792), no crash report |
 | Browser/extension runtime testing | **Not run** — app launches, but UI interaction was not exercised |
 
 ## Known issues

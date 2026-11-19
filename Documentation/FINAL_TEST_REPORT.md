@@ -99,5 +99,5 @@ should be appended here rather than assumed.
 - Extension runtime gained `chrome.i18n`, `chrome.permissions.contains/getAll`, options-page
   hosting and `chrome.action.onClicked`.
 - Unsigned IPA published as GitHub release **v1.1.0** (SHA-256 `d74f46f9…ac11425f`).
-- Device install of v1.1.0 is **pending**: the iPhone was disconnected (`usbmux` returned an
-  empty list), so the signed build was produced but not installed.
+- Device install of v1.1.0 **succeeded** on 2026-11-19: version 1.1.0 (build 31), launched as
+  PID 96792, no crash report, screenshot captured.

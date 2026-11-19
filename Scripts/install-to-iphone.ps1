@@ -41,14 +41,20 @@ if ($needsSign) {
         "-k /mnt/d/iosapp/00008130-000E35E60E30001C/00008130-000E35E60E30001C.p12 -p WSF " +
         "-m /mnt/d/iosapp/00008130-000E35E60E30001C/00008130-000E35E60E30001C.mobileprovision " +
         "-b $bundleId -o dist/CHROMEX-signed.ipa dist/CHROMEX-unsigned.ipa"
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     wsl -d Ubuntu -u root -- bash -lc $command | Select-Object -Last 4
+    $ErrorActionPreference = $previous
 }
 
 Write-Step "Waiting up to $WaitSeconds s for the iPhone"
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 $device = $null
 while ((Get-Date) -lt $deadline) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $raw = & python -m pymobiledevice3 usbmux list 2>$null | Out-String
+    $ErrorActionPreference = $previous
     try { $devices = $raw | ConvertFrom-Json } catch { $devices = @() }
     if ($devices -and @($devices).Count -gt 0) { $device = @($devices)[0]; break }
     Start-Sleep -Seconds 3
@@ -71,7 +77,10 @@ if (-not $device) {
 Write-Step "Found $($device.DeviceName) ($($device.ProductType), iOS $($device.ProductVersion))"
 
 Write-Step 'Installing'
+$previous = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $installOutput = & python -m pymobiledevice3 apps install $signed 2>&1 | Out-String
+$ErrorActionPreference = $previous
 if ($installOutput -notmatch 'Installation succeed') {
     Write-Host $installOutput
     throw 'Installation failed; see output above.'
@@ -79,7 +88,10 @@ if ($installOutput -notmatch 'Installation succeed') {
 Write-Host 'Installed.'
 
 Write-Step 'Launching'
+$previous = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $launch = & python -m pymobiledevice3 developer core-device launch-application $bundleId 2>&1 | Out-String
+$ErrorActionPreference = $previous
 if ($launch -match '"processIdentifier"\s*:\s*(\d+)') {
     Write-Host "Launched. PID $($Matches[1])."
 } else {
