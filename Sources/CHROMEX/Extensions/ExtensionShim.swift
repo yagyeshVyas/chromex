@@ -792,11 +792,16 @@ enum ExtensionShim {
 
           chrome.offscreen = chrome.offscreen || {};
           chrome.offscreen.createDocument = function (options, callback) {
+            report("chrome.offscreen.createDocument: " + String((options && options.reasons || []).join(",")));
             withCallback(Promise.resolve(), callback);
           };
           chrome.offscreen.closeDocument = function (callback) {
             withCallback(Promise.resolve(), callback);
           };
+          chrome.offscreen.hasDocument = function (callback) {
+            withCallback(Promise.resolve(false), callback);
+          };
+          chrome.offscreen.onRequest = makeEvent([]);
 
           chrome.proxy = chrome.proxy || {};
           chrome.proxy.settings = chrome.proxy.settings || {};
@@ -1091,23 +1096,23 @@ enum ExtensionShim {
           // Any chrome.* member an extension still reaches for is reported by
           // name, so a missing surface shows up in diagnostics instead of as an
           // opaque TypeError inside obfuscated code.
-          function observedChromeNamespace(target) {
+          function observedChromeNamespace(target, prefix) {
             if (!target || typeof target !== "object") { return target; }
             return new Proxy(target, {
               get: function (object, property) {
                 if (property in object) { return object[property]; }
                 if (typeof property === "symbol") { return undefined; }
-                report("chrome." + String(property) + " is not implemented");
+                report(prefix + "." + String(property) + " is not implemented");
                 return undefined;
               }
             });
           }
           Object.keys(chrome).forEach(function (name) {
             if (chrome[name] && typeof chrome[name] === "object") {
-              chrome[name] = observedChromeNamespace(chrome[name]);
+              chrome[name] = observedChromeNamespace(chrome[name], "chrome." + name);
             }
           });
-          window.chrome = observedChromeNamespace(chrome);
+          window.chrome = observedChromeNamespace(chrome, "chrome");
 
           if (CONTEXT !== "content") {
             window.addEventListener("error", function (event) {
