@@ -184,6 +184,7 @@ final class ExtensionManager: ObservableObject {
     private var nextRequestID = 1
     private var alarms: [String: [String: AlarmSpec]] = [:]
     private var ports: [String: PortEndpoint] = [:]
+    private var proxySettings: [String: [String: Any]] = [:]
     private var alarmTasks: [String: [String: Task<Void, Never>]] = [:]
     private var downloadIDs: [Int: UUID] = [:]
     private var nextDownloadID = 1
@@ -736,6 +737,25 @@ final class ExtensionManager: ObservableObject {
                 )
             }
 
+        case "cookies.get", "cookies.getAll", "cookies.set", "cookies.remove":
+            handleCookieAPI(api: api, payload: payload, respond: respond)
+
+        case "proxy.set":
+            let value = payload["value"] as? [String: Any] ?? [:]
+            proxySettings[record.id] = value
+            AppLog.write("\(record.displayName): proxy mode \(value["mode"] as? String ?? "?")", tag: "ext")
+            respond([:])
+
+        case "notifications.create":
+            let options = payload["options"] as? [String: Any] ?? [:]
+            let title = options["title"] as? String ?? record.displayName
+            let message = options["message"] as? String ?? ""
+            let notificationID = payload["id"] as? String ?? UUID().uuidString
+            let box = SendableBox(respond)
+            NotificationPresenter.shared.post(title: title, body: message, identifier: notificationID) { granted in
+                box.value(notificationID, granted ? nil : "Notifications are not permitted.")
+            }
+
         case "network.fetch":
             handleNetworkFetch(payload: payload, record: record, respond: respond)
 
@@ -884,6 +904,153 @@ final class ExtensionManager: ObservableObject {
         }
     }
 
+    private func handleCookieAPI(
+        api: String,
+        payload: [String: Any],
+        respond: @escaping (Any?, String?) -> Void
+    ) {
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        let box = SendableBox(respond)
+
+        switch api {
+        case "cookies.get":
+            let name = payload["name"] as? String ?? ""
+            let host = (payload["url"] as? String).flatMap { URL(string: $0)?.host }
+            let domain = payload["domain"] as? String
+            store.getAllCookies { cookies in
+                let found = cookies.first { cookie in
+                    cookie.name == name && Self.cookieMatches(cookie, host: host, domain: domain)
+                }
+                let result = SendableBox(found.map { Self.cookiePayload($0) })
+                Task { @MainActor in box.value(result.value, nil) }
+            }
+
+        case "cookies.getAll":
+            let host = (payload["url"] as? String).flatMap { URL(string: $0)?.host }
+            let domain = payload["domain"] as? String
+            store.getAllCookies { cookies in
+                let values = cookies
+                    .filter { Self.cookieMatches($0, host: host, domain: domain) }
+                    .map { Self.cookiePayload($0) }
+                let result = SendableBox(values)
+                Task { @MainActor in box.value(result.value, nil) }
+            }
+
+        case "cookies.set":
+            guard let name = payload["name"] as? String,
+                  let value = payload["value"] as? String else {
+                box.value(nil, "cookies.set needs name and value")
+                return
+            }
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: name,
+                .value: value,
+                .path: payload["path"] as? String ?? "/"
+            ]
+            if let domain = payload["domain"] as? String, !domain.isEmpty {
+                properties[.domain] = domain
+            } else if let urlString = payload["url"] as? String,
+                      let host = URL(string: urlString)?.host {
+                properties[.domain] = host
+            } else {
+                box.value(nil, "cookies.set needs a url or domain")
+                return
+            }
+            properties[.secure] = ((payload["secure"] as? Bool) ?? false) ? "TRUE" : "FALSE"
+            if let expires = payload["expirationDate"] as? Double {
+                properties[.expires] = Date(timeIntervalSince1970: expires)
+            }
+            guard let cookie = HTTPCookie(properties: properties) else {
+                box.value(nil, "cookies.set could not build a cookie")
+                return
+            }
+            let cookiePayload = SendableBox(Self.cookiePayload(cookie))
+            store.setCookie(cookie) {
+                Task { @MainActor in box.value(cookiePayload.value, nil) }
+            }
+
+        case "cookies.remove":
+            let name = payload["name"] as? String ?? ""
+            let host = (payload["url"] as? String).flatMap { URL(string: $0)?.host }
+            let domain = payload["domain"] as? String
+            let removal = SendableBox(payload)
+            store.getAllCookies { cookies in
+                let boxed = SendableBox(cookies)
+                Task { @MainActor in
+                    for cookie in boxed.value where cookie.name == name
+                        && Self.cookieMatches(cookie, host: host, domain: domain) {
+                        store.deleteCookie(cookie, completionHandler: nil)
+                    }
+                    box.value(removal.value, nil)
+                }
+            }
+
+        default:
+            box.value(nil, "Unsupported cookie call")
+        }
+    }
+
+    nonisolated static func cookieMatches(_ cookie: HTTPCookie, host: String?, domain: String?) -> Bool {
+        if let domain, !domain.isEmpty {
+            let bare = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            return cookie.domain == domain || cookie.domain == bare || cookie.domain == "." + bare
+        }
+        if let host, !host.isEmpty {
+            return host == cookie.domain || host.hasSuffix(cookie.domain)
+        }
+        return true
+    }
+
+    nonisolated static func cookiePayload(_ cookie: HTTPCookie) -> [String: Any] {
+        var payload: [String: Any] = [
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path,
+            "secure": cookie.isSecure,
+            "httpOnly": cookie.isHTTPOnly,
+            "hostOnly": !cookie.domain.hasPrefix("."),
+            "session": cookie.isSessionOnly
+        ]
+        if let expires = cookie.expiresDate {
+            payload["expirationDate"] = expires.timeIntervalSince1970
+        }
+        if let sameSite = cookie.sameSitePolicy?.rawValue {
+            if sameSite == "SameSiteStrict" {
+                payload["sameSite"] = "strict"
+            } else if sameSite == "SameSiteLax" {
+                payload["sameSite"] = "lax"
+            }
+        }
+        return payload
+    }
+
+    nonisolated static func proxyDictionary(from value: [String: Any]) -> [AnyHashable: Any]? {
+        guard let mode = value["mode"] as? String else { return nil }
+        switch mode {
+        case "direct":
+            return nil
+        case "fixed_servers":
+            let rules = value["rules"] as? [String: Any] ?? [:]
+            let proxy = (rules["singleProxy"] as? [String: Any])
+                ?? (rules["proxyForHttps"] as? [String: Any])
+                ?? (rules["proxyForHttp"] as? [String: Any])
+            guard let host = proxy?["host"] as? String,
+                  let port = (proxy?["port"] as? NSNumber)?.intValue else { return nil }
+            let scheme = (proxy?["scheme"] as? String)?.lowercased() ?? "http"
+            if scheme.hasPrefix("socks") {
+                return ["SOCKSEnable": 1, "SOCKSProxy": host, "SOCKSPort": port]
+            }
+            return [
+                "HTTPEnable": 1, "HTTPProxy": host, "HTTPPort": port,
+                "HTTPSEnable": 1, "HTTPSProxy": host, "HTTPSPort": port
+            ]
+        default:
+            AppLog.write("proxy mode \(mode) is not supported by the native bridge", tag: "ext")
+            return nil
+        }
+    }
+
     /// Extension pages get Chrome's host-permission privilege: requests to granted
     /// hosts go through native `URLSession`, so they are not blocked by CORS the way
     /// a normal web page would be.
@@ -919,8 +1086,14 @@ final class ExtensionManager: ObservableObject {
             }
         }
 
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 60
+        if let proxy = proxySettings[record.id], let dictionary = Self.proxyDictionary(from: proxy) {
+            configuration.connectionProxyDictionary = dictionary
+        }
         let box = SendableBox(respond)
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let session = URLSession(configuration: configuration)
+        session.dataTask(with: request) { data, response, error in
             let http = response as? HTTPURLResponse
             var headerFields: [String: String] = [:]
             for (key, value) in http?.allHeaderFields ?? [:] {

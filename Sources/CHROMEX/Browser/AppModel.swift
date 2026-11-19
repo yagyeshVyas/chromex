@@ -64,6 +64,7 @@ final class AppModel: ObservableObject {
         loadState()
         extensions.app = self
         adBlocker.prepare()
+        NotificationPresenter.shared.install()
         restoreSession()
         AppLog.write("launch: \(tabs.count) tab(s), \(extensions.installed.count) extension(s)", tag: "app")
     }

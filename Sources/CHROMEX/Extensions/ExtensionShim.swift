@@ -802,7 +802,9 @@ enum ExtensionShim {
           chrome.proxy.settings = chrome.proxy.settings || {};
           chrome.proxy.settings.set = function (details, callback) {
             report("chrome.proxy.settings.set: " + String(JSON.stringify(details && details.value || {})));
-            if (callback) { callback(); }
+            post("proxy.set", { value: (details && details.value) || {} }, function () {
+              if (callback) { callback(); }
+            });
           };
           chrome.proxy.settings.get = function (details, callback) {
             withCallback(Promise.resolve({ value: { mode: "direct" } }), callback);
@@ -827,8 +829,17 @@ enum ExtensionShim {
           chrome.notifications = chrome.notifications || {};
           chrome.notifications.create = function (id, options, callback) {
             var identifier = "chromex-" + Date.now();
-            if (typeof id === "function") { id(identifier); }
-            else if (typeof callback === "function") { callback(identifier); }
+            var opts = {};
+            var cb = null;
+            if (typeof id === "string" && id.length) { identifier = id; }
+            if (id && typeof id === "object") { opts = id; }
+            if (options && typeof options === "object") { opts = options; }
+            if (typeof options === "function") { cb = options; }
+            if (typeof callback === "function") { cb = callback; }
+            if (typeof id === "function") { cb = id; }
+            post("notifications.create", { id: identifier, options: opts }, function () {
+              if (typeof cb === "function") { cb(identifier); }
+            });
             return identifier;
           };
           chrome.notifications.clear = function (id, callback) { if (callback) { callback(true); } };
@@ -844,10 +855,18 @@ enum ExtensionShim {
           chrome.omnibox.onInputEntered = makeEvent([]);
 
           chrome.cookies = chrome.cookies || {};
-          chrome.cookies.get = function (details, callback) { withCallback(Promise.resolve(null), callback); };
-          chrome.cookies.getAll = function (details, callback) { withCallback(Promise.resolve([]), callback); };
-          chrome.cookies.set = function (details, callback) { withCallback(Promise.resolve(null), callback); };
-          chrome.cookies.remove = function (details, callback) { withCallback(Promise.resolve(null), callback); };
+          chrome.cookies.get = function (details, callback) {
+            return withCallback(request("cookies.get", details || {}), callback);
+          };
+          chrome.cookies.getAll = function (details, callback) {
+            return withCallback(request("cookies.getAll", details || {}), callback);
+          };
+          chrome.cookies.set = function (details, callback) {
+            return withCallback(request("cookies.set", details || {}), callback);
+          };
+          chrome.cookies.remove = function (details, callback) {
+            return withCallback(request("cookies.remove", details || {}), callback);
+          };
 
           chrome.history = chrome.history || {};
           chrome.history.search = function (query, callback) { withCallback(Promise.resolve([]), callback); };
