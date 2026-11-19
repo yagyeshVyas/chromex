@@ -42,7 +42,6 @@ struct BrowserView: View {
     @State private var showFind = false
     @State private var findText = ""
     @State private var findStatus: String?
-    @FocusState private var omniboxFieldFocused: Bool
 
     private var bookmarksVisible: Bool {
         model.preferences.showBookmarksBar && !model.bookmarks.isEmpty
@@ -96,7 +95,6 @@ struct BrowserView: View {
                     layerOffset: ChromeStyle.chromeHeight(bookmarksVisible: bookmarksVisible)
                         + (showFind ? ChromeStyle.findBarHeight : 0),
                     onSelect: { suggestion in
-                        omniboxFieldFocused = false
                         omniboxFocused = false
                         if let url = URL(string: suggestion.urlString) {
                             model.currentTab?.load(url)
@@ -119,15 +117,11 @@ struct BrowserView: View {
             guard !omniboxFocused, let current = model.currentTab else { return }
             omniboxText = displayText(for: current.urlString)
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    omniboxFieldFocused = false
-                    omniboxFocused = false
-                }
-            }
+        .onChange(of: omniboxFocused) { _, focused in
+            guard !focused, let current = model.currentTab else { return }
+            omniboxText = displayText(for: current.urlString)
         }
+
     }
 
     // MARK: Toolbar
@@ -143,20 +137,12 @@ struct BrowserView: View {
 
             OmniboxField(
                 text: $omniboxText,
+                fullURL: tab.urlString,
                 placeholder: "Search \(model.currentSearchEngine.name) or type a URL",
                 isSecure: tab.isSecure,
                 isPrivate: tab.isPrivate,
-                isFocused: omniboxFocused,
-                field: $omniboxFieldFocused,
-                onSubmit: submitFromOmnibox,
-                onChangedFocus: { focused in
-                    omniboxFocused = focused
-                    if focused {
-                        omniboxText = tab.urlString
-                    } else {
-                        omniboxText = displayText(for: tab.urlString)
-                    }
-                }
+                isFocused: $omniboxFocused,
+                onSubmit: submitFromOmnibox
             )
 
             ChromeIconButton(
@@ -187,7 +173,7 @@ struct BrowserView: View {
             if tab.urlString.isEmpty, tab.pageError == nil {
                 HomeView(
                     onFocusOmnibox: {
-                        omniboxFieldFocused = true
+                        omniboxFocused = true
                     },
                     onOpenURL: { url in tab.load(url) },
                     onOpenHub: { sheet = .hub }
@@ -261,7 +247,6 @@ struct BrowserView: View {
     private func submitFromOmnibox() {
         let trimmed = omniboxText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        omniboxFieldFocused = false
         omniboxFocused = false
         model.submit(trimmed)
     }
@@ -382,13 +367,13 @@ struct ChromeTabStrip: View {
 
 struct OmniboxField: View {
     @Binding var text: String
+    /// Full URL shown (and selected) while editing, the way Chrome does it.
+    let fullURL: String
     let placeholder: String
     let isSecure: Bool
     let isPrivate: Bool
-    let isFocused: Bool
-    @FocusState.Binding var field: Bool
+    @Binding var isFocused: Bool
     var onSubmit: () -> Void
-    var onChangedFocus: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
@@ -396,15 +381,13 @@ struct OmniboxField: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isPrivate ? ChromeStyle.incognito : (isSecure ? ChromeStyle.textSecondary : ChromeStyle.danger))
 
-            TextField(placeholder, text: $text)
-                .font(.system(size: 15))
-                .foregroundStyle(ChromeStyle.text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.webSearch)
-                .submitLabel(.go)
-                .focused($field)
-                .onSubmit(onSubmit)
+            ChromeAddressField(
+                text: $text,
+                isFocused: $isFocused,
+                focusText: fullURL,
+                placeholder: placeholder,
+                onSubmit: onSubmit
+            )
 
             if isFocused, !text.isEmpty {
                 Button {
@@ -428,9 +411,102 @@ struct OmniboxField: View {
             RoundedRectangle(cornerRadius: 19, style: .continuous)
                 .strokeBorder(isFocused ? ChromeStyle.accent.opacity(0.7) : Color.clear, lineWidth: 1.5)
         )
-        .onTapGesture { field = true }
-        .onChange(of: field) { _, newValue in
-            onChangedFocus(newValue)
+        .onTapGesture { isFocused = true }
+    }
+}
+
+/// UIKit text field behind the omnibox.
+///
+/// SwiftUI's `TextField` cannot select its contents when focus arrives, so typing
+/// after a tap appended to the old address instead of replacing it. Chrome selects
+/// the whole address on focus; a `UITextField` is the only way to match that.
+struct ChromeAddressField: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let focusText: String
+    let placeholder: String
+    var onSubmit: () -> Void
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.delegate = context.coordinator
+        field.borderStyle = .none
+        field.backgroundColor = .clear
+        field.font = .systemFont(ofSize: 15)
+        field.autocapitalizationType = .none
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.smartDashesType = .no
+        field.smartQuotesType = .no
+        field.keyboardType = .webSearch
+        field.returnKeyType = .go
+        field.textContentType = .URL
+        field.textColor = UIColor(ChromeStyle.text)
+        field.tintColor = UIColor(ChromeStyle.accent)
+        field.placeholder = placeholder
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.addTarget(context.coordinator, action: #selector(Coordinator.edited(_:)), for: .editingChanged)
+
+        let toolbar = UIToolbar()
+        toolbar.sizeToFit()
+        toolbar.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(title: "Done", style: .done, target: context.coordinator, action: #selector(Coordinator.dismissKeyboard))
+        ]
+        field.inputAccessoryView = toolbar
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.parent = self
+        field.placeholder = placeholder
+        if field.text != text {
+            field.text = text
+        }
+        if isFocused, !field.isFirstResponder {
+            field.becomeFirstResponder()
+        } else if !isFocused, field.isFirstResponder {
+            field.resignFirstResponder()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: ChromeAddressField
+
+        init(_ parent: ChromeAddressField) {
+            self.parent = parent
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            let address = parent.focusText
+            textField.text = address
+            parent.text = address
+            parent.isFocused = true
+            textField.selectAll(nil)
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            parent.isFocused = false
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            parent.onSubmit()
+            return true
+        }
+
+        @objc func edited(_ field: UITextField) {
+            parent.text = field.text ?? ""
+        }
+
+        @objc func dismissKeyboard() {
+            parent.isFocused = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
     }
 }

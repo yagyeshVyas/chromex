@@ -34,6 +34,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     private weak var model: AppModel?
     private var progressObservation: NSKeyValueObservation?
     private var filePanelCoordinator: FilePanelCoordinator?
+    private var isAdoptingDownload = false
 
     /// Desktop Chrome identity. Sites branch on this string; sending Safari's
     /// makes a "desktop mode" that still receives mobile layouts on some sites.
@@ -290,6 +291,7 @@ extension BrowserTab {
 
 extension BrowserTab: @preconcurrency WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        isAdoptingDownload = false
         isLoading = true
         estimatedProgress = 0
         errorMessage = nil
@@ -330,6 +332,18 @@ extension BrowserTab: @preconcurrency WKNavigationDelegate {
         isLoading = false
         let nsError = error as NSError
         guard !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) else { return }
+
+        // A navigation converted into a download ends with WebKit's
+        // "frame load interrupted" (WebKitErrorDomain 102). That is not a page
+        // failure: the tab stays on the previous page and the file is saved.
+        if isAdoptingDownload, nsError.domain == "WebKitErrorDomain", nsError.code == 102 {
+            isAdoptingDownload = false
+            pageError = nil
+            errorMessage = nil
+            syncNavigationState()
+            return
+        }
+
         pageError = makePageError(error)
         AppLog.write("navigation failed: \(urlString) — \(nsError.domain) \(nsError.code) \(nsError.localizedDescription)", tag: "nav")
     }
@@ -411,10 +425,12 @@ extension BrowserTab: @preconcurrency WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        isAdoptingDownload = true
         model?.downloadsCenter.adopt(download, suggestedName: download.originalRequest?.url?.lastPathComponent)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        isAdoptingDownload = true
         model?.downloadsCenter.adopt(download)
     }
 }

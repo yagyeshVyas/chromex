@@ -628,7 +628,7 @@ final class ExtensionManager: ObservableObject {
 
         case "tabs.query":
             let query = payload["query"] as? [String: Any] ?? [:]
-            respond(tabsPayload(matching: query))
+            respond(tabsPayload(matching: query, record: record))
 
         case "tabs.create":
             let options = payload["options"] as? [String: Any] ?? [:]
@@ -638,7 +638,7 @@ final class ExtensionManager: ObservableObject {
             }
             let active = options["active"] as? Bool ?? true
             app?.extensionOpenTab(url: url, active: active)
-            respond(tabPayload(for: app?.extensionTabs.first { $0.url == urlString }))
+            respond(tabPayload(for: app?.extensionTabs.first { $0.url == urlString }, record: record))
 
         case "tabs.update":
             let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
@@ -799,17 +799,24 @@ final class ExtensionManager: ObservableObject {
         }
     }
 
-    private func tabsPayload(matching query: [String: Any]) -> [[String: Any]] {
+    private func tabsPayload(matching query: [String: Any], record: InstalledExtension) -> [[String: Any]] {
         guard let tabs = app?.extensionTabs else { return [] }
         let wantActive = query["active"] as? Bool
         return tabs.compactMap { tab in
             if let wantActive, tab.isActive != wantActive { return nil }
-            return tabPayload(for: tab)
+            return tabPayload(for: tab, record: record)
         }
     }
 
-    private func tabPayload(for tab: ExtensionTabInfo?) -> [String: Any] {
+    private func tabPayload(for tab: ExtensionTabInfo?, record: InstalledExtension) -> [String: Any] {
         guard let tab else { return [:] }
+        // Chrome only exposes URL and title for tabs the extension may read.
+        let url = tab.url.isEmpty ? nil : URL(string: tab.url)
+        let canRead = record.grants.contains("<all_urls>")
+            || record.grants.contains { pattern in
+                guard let url else { return false }
+                return HostMatcher.matches(pattern: pattern, url: url)
+            }
         return [
             "id": tab.id,
             "index": tab.id - 1,
@@ -817,8 +824,8 @@ final class ExtensionManager: ObservableObject {
             "active": tab.isActive,
             "highlighted": tab.isActive,
             "incognito": tab.isPrivate,
-            "url": tab.url,
-            "title": tab.title,
+            "url": canRead ? tab.url : "",
+            "title": canRead ? tab.title : "",
             "status": "complete"
         ]
     }
