@@ -32,11 +32,27 @@ struct RootView: View {
 
 // MARK: - Browser
 
+/// One presentation at a time. Multiple `.sheet` modifiers on the same view are
+/// unreliable — SwiftUI may present only one — which is why the Hub button could
+/// appear to do nothing.
+enum BrowserSheet: Identifiable {
+    case page(BrowserRoute)
+    case tabs
+    case share(ShareItem)
+
+    var id: String {
+        switch self {
+        case .page(let route): return route.rawValue
+        case .tabs: return "tabs"
+        case .share: return "share"
+        }
+    }
+}
+
 struct BrowserView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var route: BrowserRoute?
+    @State private var sheet: BrowserSheet?
     @State private var showingMenu = false
-    @State private var shareItem: ShareItem?
 
     var body: some View {
         ZStack {
@@ -45,14 +61,14 @@ struct BrowserView: View {
             VStack(spacing: 0) {
                 if let tab = model.currentTab {
                     content(for: tab)
-                    OmniboxBar(tab: tab) { route = .hub }
+                    OmniboxBar(tab: tab) { sheet = .page(.hub) }
                     BrowserToolbar(
                         tab: tab,
                         tabCount: model.tabs.count,
                         onBack: { tab.goBack() },
                         onForward: { tab.goForward() },
                         onTabs: { model.showingTabSwitcher = true },
-                        onExtensions: { route = .hub },
+                        onExtensions: { sheet = .page(.hub) },
                         onMenu: { showingMenu = true }
                     )
                 } else {
@@ -66,7 +82,47 @@ struct BrowserView: View {
                 }
             }
         }
-        .sheet(item: $route) { route in
+        .sheet(item: $sheet) { active in
+            sheetContent(active)
+        }
+        .onChange(of: model.showingTabSwitcher) { _, showing in
+            if showing {
+                model.showingTabSwitcher = false
+                sheet = .tabs
+            }
+        }
+        .confirmationDialog("CHROMEX", isPresented: $showingMenu, titleVisibility: .hidden) {
+            Button("New Tab") { model.openTab(url: nil, select: true) }
+            Button("New Private Tab") { model.openTab(url: nil, select: true, private: true) }
+            if let tab = model.currentTab, !tab.urlString.isEmpty {
+                Button(model.isBookmarked(urlString: tab.urlString) ? "Remove Bookmark" : "Add Bookmark") {
+                    model.toggleBookmark(title: tab.snapshotTitle(), urlString: tab.urlString)
+                }
+                Button(tab.isDesktopMode ? "Request Mobile Site" : "Request Desktop Site") {
+                    tab.setDesktopMode(!tab.isDesktopMode)
+                }
+                Button("Share Page") {
+                    if let url = URL(string: tab.urlString) {
+                        sheet = .share(ShareItem(url: url))
+                    }
+                }
+            }
+            Button("Bookmarks") { sheet = .page(.bookmarks) }
+            Button("History") { sheet = .page(.history) }
+            Button("Downloads") { sheet = .page(.downloads) }
+            Button("Privacy Dashboard") { sheet = .page(.privacy) }
+            Button("Settings") { sheet = .page(.settings) }
+            if model.tabs.count > 1 {
+                Button("Close Tab", role: .destructive) { model.closeCurrentTab() }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ active: BrowserSheet) -> some View {
+        switch active {
+        case .page(let route):
             switch route {
             case .hub:
                 NavigationStack { HubView() }
@@ -81,45 +137,11 @@ struct BrowserView: View {
             case .privacy:
                 NavigationStack { PrivacyDashboardView() }
             }
-        }
-        .sheet(isPresented: $model.showingTabSwitcher) {
+        case .tabs:
             TabSwitcherView()
-        }
-        .sheet(item: $model.popupExtension) { record in
-            ExtensionPopupView(record: record)
-        }
-        .sheet(item: $model.optionsExtension) { record in
-            ExtensionOptionsView(record: record)
-        }
-        .sheet(item: $shareItem) { item in
+        case .share(let item):
             ActivityView(activityItems: [item.url])
                 .presentationDetents([.medium, .large])
-        }
-        .confirmationDialog("CHROMEX", isPresented: $showingMenu, titleVisibility: .hidden) {
-            Button("New Tab") { model.openTab(url: nil, select: true) }
-            Button("New Private Tab") { model.openTab(url: nil, select: true, private: true) }
-            if let tab = model.currentTab, !tab.urlString.isEmpty {
-                Button(model.isBookmarked(urlString: tab.urlString) ? "Remove Bookmark" : "Add Bookmark") {
-                    model.toggleBookmark(title: tab.snapshotTitle(), urlString: tab.urlString)
-                }
-                Button(tab.isDesktopMode ? "Request Mobile Site" : "Request Desktop Site") {
-                    tab.setDesktopMode(!tab.isDesktopMode)
-                }
-                Button("Share Page") {
-                    if let url = URL(string: tab.urlString) {
-                        shareItem = ShareItem(url: url)
-                    }
-                }
-            }
-            Button("Bookmarks") { route = .bookmarks }
-            Button("History") { route = .history }
-            Button("Downloads") { route = .downloads }
-            Button("Privacy Dashboard") { route = .privacy }
-            Button("Settings") { route = .settings }
-            if model.tabs.count > 1 {
-                Button("Close Tab", role: .destructive) { model.closeCurrentTab() }
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -130,7 +152,7 @@ struct BrowserView: View {
                 .background(ChromexColor.background)
 
             if tab.urlString.isEmpty {
-                HomeView(onOpenHub: { route = .hub }, onOpenURL: { url in tab.load(url) })
+                HomeView(onOpenHub: { sheet = .page(.hub) }, onOpenURL: { url in tab.load(url) })
                     .transition(.opacity)
             }
 

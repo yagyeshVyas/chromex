@@ -21,8 +21,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var tabs: [BrowserTab] = []
     @Published var selectedTabID: UUID?
     @Published var showingTabSwitcher = false
-    @Published var popupExtension: InstalledExtension?
-    @Published var optionsExtension: InstalledExtension?
 
     // MARK: Library state
     @Published private(set) var bookmarks: [Bookmark] = []
@@ -449,16 +447,6 @@ final class AppModel: ObservableObject {
         )
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: stateURL, options: .atomic)
-    }
-
-    // MARK: Extension UI
-
-    func openPopup(for record: InstalledExtension) {
-        popupExtension = record
-    }
-
-    func openOptions(for record: InstalledExtension) {
-        optionsExtension = record
     }
 
     // MARK: Privacy summary

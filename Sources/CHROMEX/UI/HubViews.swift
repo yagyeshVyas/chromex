@@ -210,12 +210,19 @@ struct ExtensionRow: View {
 
 // MARK: - Detail
 
+enum ExtensionPage: String, Identifiable {
+    case popup
+    case options
+    var id: String { rawValue }
+}
+
 struct ExtensionDetailView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let record: InstalledExtension
 
     @State private var showingRemove = false
+    @State private var page: ExtensionPage?
 
     private var current: InstalledExtension {
         model.extensions.installed.first { $0.id == record.id } ?? record
@@ -269,6 +276,14 @@ struct ExtensionDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Its package, storage and grants are deleted from this device.")
+        }
+        .sheet(item: $page) { page in
+            switch page {
+            case .popup:
+                ExtensionPopupView(record: current)
+            case .options:
+                ExtensionOptionsView(record: current)
+            }
         }
     }
 
@@ -423,7 +438,7 @@ struct ExtensionDetailView: View {
 
     private var popupButton: some View {
         Button {
-            model.openPopup(for: current)
+            page = .popup
         } label: {
             Text("Open popup")
         }
@@ -432,7 +447,7 @@ struct ExtensionDetailView: View {
 
     private var optionsButton: some View {
         Button {
-            model.openOptions(for: current)
+            page = .options
         } label: {
             Text("Open options")
         }
