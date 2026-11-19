@@ -8,6 +8,13 @@ enum RunAt: String, Codable, Sendable, Hashable {
     case documentIdle = "document_idle"
 }
 
+/// Chrome's `"world"` on a content script. MAIN scripts run in the page's own
+/// JavaScript context with no extension APIs; ISOLATED scripts run beside the page.
+enum ContentWorldKind: String, Sendable, Hashable {
+    case isolated = "ISOLATED"
+    case main = "MAIN"
+}
+
 struct ContentScript: Sendable, Hashable {
     var matches: [String] = []
     var excludeMatches: [String] = []
@@ -15,6 +22,7 @@ struct ContentScript: Sendable, Hashable {
     var css: [String] = []
     var runAt: RunAt = .documentIdle
     var allFrames: Bool = false
+    var world: ContentWorldKind = .isolated
 }
 
 struct ExtensionAction: Sendable, Hashable {
@@ -182,7 +190,8 @@ enum ManifestParser {
                 js: (dict["js"] as? [String]) ?? [],
                 css: (dict["css"] as? [String]) ?? [],
                 runAt: RunAt(rawValue: (dict["run_at"] as? String) ?? "") ?? .documentIdle,
-                allFrames: (dict["all_frames"] as? Bool) ?? false
+                allFrames: (dict["all_frames"] as? Bool) ?? false,
+                world: ContentWorldKind(rawValue: (dict["world"] as? String) ?? "") ?? .isolated
             )
         }
     }
@@ -318,33 +327,46 @@ struct APIEntry: Identifiable, Codable, Sendable, Hashable {
 
 enum ExtensionAPICatalog {
     static let entries: [APIEntry] = [
-        APIEntry(name: "content_scripts", status: .supported, note: "Injected at the declared run_at, JS and CSS."),
+        APIEntry(name: "content_scripts", status: .supported, note: "Injected at the declared run_at, world and frame scope, JS and CSS."),
         APIEntry(name: "storage.local", status: .supported, note: "Local key/value store, persisted per extension."),
         APIEntry(name: "storage.session", status: .partial, note: "Mapped to local storage; cleared when the extension is disabled."),
         APIEntry(name: "runtime.sendMessage", status: .supported, note: "Content, popup and background pages can message the background."),
         APIEntry(name: "runtime.onMessage", status: .supported, note: "Delivered to the background page; responses are routed back."),
         APIEntry(name: "runtime.getURL", status: .supported, note: "Returns a chromex-extension:// URL for packaged resources."),
-        APIEntry(name: "tabs.query", status: .partial, note: "Reports the active tab only. Titles and URLs require host access."),
-        APIEntry(name: "tabs.create", status: .partial, note: "Opens a tab in CHROMEX; the extension cannot manage other tabs."),
+        APIEntry(name: "runtime.getManifest", status: .supported, note: "Returns the parsed manifest object."),
+        APIEntry(name: "runtime.getPlatformInfo", status: .supported, note: "Reports os: ios, arch: arm64."),
+        APIEntry(name: "tabs.query", status: .partial, note: "Reports the real tabs in CHROMEX. Titles and URLs need host access."),
+        APIEntry(name: "tabs.create", status: .partial, note: "Opens a tab in CHROMEX; the extension cannot manage windows."),
+        APIEntry(name: "tabs.sendMessage", status: .partial, note: "Delivered to content scripts in the target tab."),
+        APIEntry(name: "tabs.update", status: .partial, note: "Navigate, activate and reload the current window's tabs."),
         APIEntry(name: "action (popup)", status: .supported, note: "The declared popup opens in a CHROMEX sheet."),
-        APIEntry(name: "action.setBadgeText", status: .unsupported, note: "No badge surface in this build."),
-        APIEntry(name: "scripting.executeScript", status: .unsupported, note: "Use declared content_scripts instead."),
+        APIEntry(name: "action.onClicked", status: .supported, note: "Fires for extensions without a popup, from Trigger action."),
+        APIEntry(name: "scripting.executeScript", status: .partial, note: "Runs code or files in the page or isolated world of a CHROMEX tab."),
         APIEntry(name: "i18n", status: .supported, note: "getMessage resolves _locales; missing keys fall back to the key name."),
-        APIEntry(name: "alarms", status: .unsupported, note: "iOS cannot keep a background scheduler alive."),
-        APIEntry(name: "notifications", status: .unsupported, note: "Not bridged in this build."),
+        APIEntry(name: "alarms", status: .partial, note: "Timers fire while the app is running; iOS suspends them with the app."),
+        APIEntry(name: "notifications", status: .partial, note: "Accepted, but there is no system notification surface on iOS here."),
+        APIEntry(name: "webNavigation", status: .partial, note: "onCommitted/onCompleted fire for main-frame navigations."),
+        APIEntry(name: "webRequest", status: .unsupported, note: "WebKit gives no request observation hook to the browser."),
+        APIEntry(name: "webRequestAuthProvider", status: .unsupported, note: "No auth challenge hook is exposed to the browser."),
+        APIEntry(name: "webRequestBlocking", status: .refused, note: "The engine cannot intercept requests. Refused by design."),
+        APIEntry(name: "declarativeNetRequest", status: .unsupported, note: "Category blocking is provided by CHROMEX itself, not per extension."),
+        APIEntry(name: "declarativeNetRequestWithHostAccess", status: .partial, note: "Rules are accepted but not enforced; CHROMEX blocking applies globally."),
+        APIEntry(name: "proxy", status: .partial, note: "Accepted and ignored: iOS routes extension traffic through the app's own stack."),
+        APIEntry(name: "offscreen", status: .partial, note: "createDocument resolves immediately; no hidden document is kept alive."),
+        APIEntry(name: "system.cpu", status: .partial, note: "Reports processor count; model name is blank."),
+        APIEntry(name: "system.memory", status: .partial, note: "Reports physical memory; available capacity is not exposed."),
+        APIEntry(name: "downloads", status: .partial, note: "Registered HTTP(S) downloads run; progress stays in the Downloads screen."),
+        APIEntry(name: "clipboardRead", status: .supported, note: "Backed by the device pasteboard."),
+        APIEntry(name: "clipboardWrite", status: .supported, note: "Backed by the device pasteboard."),
+        APIEntry(name: "activeTab", status: .supported, note: "The active tab is available to tabs.query."),
         APIEntry(name: "contextMenus", status: .unsupported, note: "Not bridged in this build."),
         APIEntry(name: "commands", status: .unsupported, note: "Not bridged in this build."),
-        APIEntry(name: "declarativeNetRequest", status: .unsupported, note: "Category blocking is provided by CHROMEX itself, not per extension."),
-        APIEntry(name: "webRequest", status: .unsupported, note: "WebKit gives no request observation hook to the browser."),
-        APIEntry(name: "webRequestBlocking", status: .refused, note: "The engine cannot intercept requests. Refused by design."),
         APIEntry(name: "cookies", status: .unsupported, note: "Cookie access is not exposed to extensions."),
         APIEntry(name: "history", status: .unsupported, note: "Not exposed to extensions."),
         APIEntry(name: "bookmarks", status: .unsupported, note: "Not exposed to extensions."),
-        APIEntry(name: "downloads", status: .unsupported, note: "Not exposed to extensions."),
         APIEntry(name: "identity", status: .unsupported, note: "No OAuth bridge."),
         APIEntry(name: "nativeMessaging", status: .refused, note: "iOS forbids spawning helper processes."),
         APIEntry(name: "debugger", status: .refused, note: "No page-process debugging surface."),
-        APIEntry(name: "offscreen", status: .unsupported, note: "No offscreen document concept in WebKit."),
         APIEntry(name: "tabGroups", status: .unsupported, note: "Not bridged in this build."),
         APIEntry(name: "sidePanel", status: .unsupported, note: "No side panel on iPhone."),
         APIEntry(name: "userScripts", status: .unsupported, note: "Not bridged in this build."),
@@ -353,9 +375,14 @@ enum ExtensionAPICatalog {
     ]
 
     static let unsupportedPermissions: Set<String> = [
-        "alarms", "cookies", "debugger", "declarativeNetRequest", "history",
-        "identity", "management", "nativeMessaging", "notifications", "offscreen",
-        "proxy", "scripting", "tabGroups", "userScripts", "webRequest", "webRequestBlocking"
+        "bookmarks", "commands", "contextMenus", "cookies", "debugger", "declarativeNetRequest",
+        "history", "identity", "management", "nativeMessaging", "tabGroups", "userScripts",
+        "webRequest", "webRequestAuthProvider", "webRequestBlocking"
+    ]
+
+    static let partialPermissions: Set<String> = [
+        "alarms", "declarativeNetRequestWithHostAccess", "downloads", "notifications",
+        "offscreen", "proxy", "scripting", "system.cpu", "system.memory", "webNavigation"
     ]
 
     static let refusedPermissions: Set<String> = ["debugger", "nativeMessaging", "webRequestBlocking"]
@@ -434,6 +461,13 @@ enum CompatibilityAnalyzer {
                     message: "Declared but not implemented in this build."
                 ))
                 unsupported.append(permission)
+            } else if ExtensionAPICatalog.partialPermissions.contains(permission) {
+                supported.append(permission)
+                findings.append(CompatibilityFinding(
+                    api: permission,
+                    status: .partial,
+                    message: ExtensionAPICatalog.entry(named: permission)?.note ?? "Partially implemented."
+                ))
             } else if let entry = ExtensionAPICatalog.entry(named: permission) {
                 supported.append(permission)
                 if entry.status == .partial || entry.status == .unsupported {

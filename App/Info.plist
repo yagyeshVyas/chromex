@@ -56,5 +56,28 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Websites you allow can use the camera for calls, scanning and uploads.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Websites you allow can use the microphone for calls and voice input.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Websites you allow can request your location while CHROMEX is open.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Lets websites upload photos you pick.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>http</string>
+		<string>https</string>
+		<string>tel</string>
+		<string>sms</string>
+		<string>mailto</string>
+		<string>facetime</string>
+		<string>facetime-audio</string>
+		<string>maps</string>
+		<string>itms-apps</string>
+		<string>webcal</string>
+		<string>ssh</string>
+		<string>vnc</string>
+	</array>
 </dict>
 </plist>

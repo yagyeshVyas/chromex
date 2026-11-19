@@ -13,6 +13,7 @@ struct PersistedState: Codable, Sendable {
     var groups: [TabGroup] = []
     var preferences: AppPreferences = AppPreferences()
     var session: [SessionTab] = []
+    var sessionIndex: Int? = nil
 }
 
 @MainActor
@@ -35,12 +36,19 @@ final class AppModel: ObservableObject {
 
     // MARK: Services
     let adBlocker = AdBlocker()
+
+    /// Content scripts run here, never in the page's own world: page JavaScript
+    /// can then neither read the extension bridge token nor overwrite helpers.
+    let contentWorld = WKContentWorld.world(name: "chromex-content")
     let extensions: ExtensionManager
+    private(set) lazy var downloadsCenter: DownloadCenter = { DownloadCenter(model: self) }()
 
     private let supportDirectory: URL
     private let stateURL: URL
     private var saveTask: Task<Void, Never>?
     private let historyLimit = 3_000
+    private var sessionSnapshot: [SessionTab] = []
+    private var sessionSelectedIndex = 0
 
     // MARK: Init
 
@@ -54,9 +62,10 @@ final class AppModel: ObservableObject {
         extensions = ExtensionManager(root: support.appendingPathComponent("Extensions", isDirectory: true))
 
         loadState()
-        wireExtensionRuntime()
+        extensions.app = self
         adBlocker.prepare()
         restoreSession()
+        AppLog.write("launch: \(tabs.count) tab(s), \(extensions.installed.count) extension(s)", tag: "app")
     }
 
     // MARK: Convenience
@@ -76,11 +85,16 @@ final class AppModel: ObservableObject {
     }
 
     var presentingViewController: UIViewController? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
+        guard let root = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
-            .rootViewController
+            .rootViewController else { return nil }
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
     }
 
     // MARK: Tabs
@@ -101,13 +115,23 @@ final class AppModel: ObservableObject {
                   let homeURL = URLResolver.destination(for: preferences.homepage, engine: currentSearchEngine) {
             tab.load(homeURL)
         }
-        scheduleSave()
+        persistSession()
         return tab
+    }
+
+    /// Chrome's `target="_blank"` behaviour: a new tab in the strip, selected.
+    func openTabInBackgroundOrSelect(url: URL) {
+        if preferences.openLinksInNewTab {
+            openTab(url: url, select: false)
+        } else {
+            openTab(url: url, select: true)
+        }
     }
 
     func select(_ tab: BrowserTab) {
         selectedTabID = tab.id
         tab.ensureLoaded()
+        persistSession()
     }
 
     func closeTab(_ tab: BrowserTab) {
@@ -116,6 +140,7 @@ final class AppModel: ObservableObject {
         if selectedTabID == tab.id {
             let next = tabs.indices.contains(index) ? tabs[index] : tabs.last
             selectedTabID = next?.id
+            next?.ensureLoaded()
         }
         if tabs.isEmpty {
             openTab(url: nil, select: true, private: tab.isPrivate)
@@ -151,13 +176,23 @@ final class AppModel: ObservableObject {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.applicationNameForUserAgent = "CHROMEX/1.0"
+        configuration.allowsPictureInPictureMediaPlayback = true
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        configuration.applicationNameForUserAgent = "CHROMEX/2.0"
+        configuration.setURLSchemeHandler(extensions.schemeHandler, forURLScheme: ExtensionSchemeHandler.scheme)
         if preferences.blockAdsAndTrackers {
             adBlocker.attach(to: configuration)
         }
         configuration.userContentController.add(extensions.bridge, name: "chromexBridge")
+        configuration.userContentController.add(nativeBridge, name: "chromexNative")
         return configuration
     }
+
+    private lazy var nativeBridge: NativeBridge = {
+        let bridge = NativeBridge()
+        bridge.model = self
+        return bridge
+    }()
 
     func prepareContentScripts(for tab: BrowserTab, url: URL) {
         let controller = tab.webView.configuration.userContentController
@@ -165,12 +200,18 @@ final class AppModel: ObservableObject {
         let injections = extensions.injections(for: url, isPrivate: tab.isPrivate)
         for injection in injections {
             let time: WKUserScriptInjectionTime = injection.runAt == .documentStart ? .atDocumentStart : .atDocumentEnd
+            let world: WKContentWorld = injection.world == .main ? .page : contentWorld
             controller.addUserScript(WKUserScript(
                 source: injection.source,
                 injectionTime: time,
-                forMainFrameOnly: !injection.allFrames
+                forMainFrameOnly: !injection.allFrames,
+                in: world
             ))
         }
+    }
+
+    func contentScriptsDidFinishLoading(in tab: BrowserTab) {
+        extensions.navigationDidFinish(urlString: tab.urlString, isPrivate: tab.isPrivate)
     }
 
     // MARK: History
@@ -206,6 +247,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// One entry per host for the new-tab shortcut grid, newest first.
+    var topSites: [HistoryEntry] {
+        var seen = Set<String>()
+        var result: [HistoryEntry] = []
+        for entry in history {
+            guard let host = URL(string: entry.urlString)?.host, !host.isEmpty else { continue }
+            guard seen.insert(host.lowercased()).inserted else { continue }
+            result.append(entry)
+            if result.count == 8 { break }
+        }
+        return result
+    }
+
     // MARK: Bookmarks
 
     func isBookmarked(urlString: String) -> Bool {
@@ -228,15 +282,59 @@ final class AppModel: ObservableObject {
 
     // MARK: Downloads
 
-    func startDownload(_ url: URL) {
-        let filename = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
-        let item = DownloadItem(
-            filename: filename,
-            sourceURLString: url.absoluteString,
-            state: .inProgress
-        )
+    func insertDownload(_ item: DownloadItem) {
         downloads.insert(item, at: 0)
         scheduleSave()
+    }
+
+    func updateDownload(id: UUID, progress: Double) {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        downloads[index].progress = progress
+    }
+
+    func renameDownload(id: UUID, filename: String) {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        downloads[index].filename = filename
+        scheduleSave()
+    }
+
+    func completeDownload(id: UUID, path: String?, byteCount: Int64) {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        guard let path else {
+            downloads[index].state = .failed
+            downloads[index].errorMessage = "The download could not be saved."
+            scheduleSave()
+            return
+        }
+        downloads[index].localPath = path
+        downloads[index].byteCount = byteCount
+        downloads[index].progress = 1
+        downloads[index].state = .completed
+        scheduleSave()
+    }
+
+    func failDownload(id: UUID, message: String) {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        downloads[index].state = .failed
+        downloads[index].errorMessage = message
+        scheduleSave()
+    }
+
+    func removeDownload(_ item: DownloadItem) {
+        if let path = item.localPath {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        downloads.removeAll { $0.id == item.id }
+        scheduleSave()
+    }
+
+    /// Direct transfer used for links, context-menu downloads and extension
+    /// `chrome.downloads.download` calls. Returns the item id.
+    @discardableResult
+    func startURLSessionDownload(_ url: URL) -> UUID {
+        let filename = DownloadCenter.safeFilename(url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent)
+        let item = DownloadItem(filename: filename, sourceURLString: url.absoluteString, state: .inProgress)
+        insertDownload(item)
 
         URLSession.shared.downloadTask(with: url) { temporaryURL, _, error in
             // URLSession deletes the temporary file when this handler returns, so the
@@ -246,8 +344,8 @@ final class AppModel: ObservableObject {
 
             if let temporaryURL, failure == nil {
                 let fileManager = FileManager.default
-                let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                let directory = documents.appendingPathComponent("Downloads", isDirectory: true)
+                let directory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("Downloads", isDirectory: true)
                 try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
                 let destination = directory.appendingPathComponent("\(UUID().uuidString.prefix(8))-\(filename)")
                 do {
@@ -260,34 +358,18 @@ final class AppModel: ObservableObject {
 
             let path = savedPath
             let message = failure
+            let attributes = path.flatMap { try? FileManager.default.attributesOfItem(atPath: $0) }
+            let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             Task { @MainActor [weak self] in
-                self?.completeDownload(id: item.id, savedPath: path, errorMessage: message)
+                guard let self else { return }
+                guard let path, message == nil else {
+                    self.failDownload(id: item.id, message: message ?? "The download could not be completed.")
+                    return
+                }
+                self.completeDownload(id: item.id, path: path, byteCount: size)
             }
         }.resume()
-    }
-
-    private func completeDownload(id: UUID, savedPath: String?, errorMessage: String?) {
-        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
-        guard let savedPath, errorMessage == nil else {
-            downloads[index].state = .failed
-            downloads[index].errorMessage = errorMessage ?? "The download could not be completed."
-            scheduleSave()
-            return
-        }
-
-        let attributes = try? FileManager.default.attributesOfItem(atPath: savedPath)
-        downloads[index].byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
-        downloads[index].localPath = savedPath
-        downloads[index].state = .completed
-        scheduleSave()
-    }
-
-    func removeDownload(_ item: DownloadItem) {
-        if let path = item.localPath {
-            try? FileManager.default.removeItem(atPath: path)
-        }
-        downloads.removeAll { $0.id == item.id }
-        scheduleSave()
+        return item.id
     }
 
     // MARK: Permissions
@@ -306,10 +388,38 @@ final class AppModel: ObservableObject {
         scheduleSave()
     }
 
-    /// Used by `WKUIDelegate` for camera and microphone capture.
-    func captureDecision(for host: String?, type: SitePermissionType) -> PermissionDecision {
-        guard let host else { return .deny }
-        return decision(for: host, type: type) ?? .deny
+    /// Asks once per site and remembers the answer, like Chrome's site settings.
+    func requestPermission(
+        for host: String?,
+        type: SitePermissionType,
+        completion: @escaping (PermissionDecision) -> Void
+    ) {
+        guard let host, !host.isEmpty else {
+            completion(.deny)
+            return
+        }
+        if let stored = decision(for: host, type: type) {
+            completion(stored)
+            return
+        }
+        guard let presenter = presentingViewController else {
+            completion(.deny)
+            return
+        }
+        let alert = UIAlertController(
+            title: "“\(host)” wants to use your \(type.displayName.lowercased())",
+            message: "You can change this later in Settings.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Block", style: .cancel) { [weak self] _ in
+            self?.setDecision(.deny, for: host, type: type)
+            completion(.deny)
+        })
+        alert.addAction(UIAlertAction(title: "Allow", style: .default) { [weak self] _ in
+            self?.setDecision(.allow, for: host, type: type)
+            completion(.allow)
+        })
+        presenter.present(alert, animated: true)
     }
 
     // MARK: Search engines
@@ -332,7 +442,7 @@ final class AppModel: ObservableObject {
     // MARK: Groups
 
     func createGroup(name: String) {
-        groups.append(TabGroup(name: name, colorHex: "#2E6BFF"))
+        groups.append(TabGroup(name: name, colorHex: "#1A73E8"))
         scheduleSave()
     }
 
@@ -347,65 +457,140 @@ final class AppModel: ObservableObject {
     // MARK: Session
 
     func persistSession() {
-        let session = tabs
-            .filter { !$0.isPrivate }
-            .compactMap { tab -> SessionTab? in
-                guard !tab.urlString.isEmpty else { return nil }
-                return SessionTab(urlString: tab.urlString, title: tab.snapshotTitle(), groupID: tab.groupID)
-            }
-        let current = tabs.map(\.id)
-        UserDefaults.standard.set(current.count, forKey: "chromex.lastTabCount")
-        pendingSession = session
+        let restored = tabs.filter { !$0.isPrivate }
+        sessionSnapshot = restored.map { tab in
+            SessionTab(urlString: tab.urlString, title: tab.snapshotTitle(), groupID: tab.groupID)
+        }
+        sessionSelectedIndex = restored.firstIndex { $0.id == selectedTabID } ?? 0
         scheduleSave()
     }
 
-    private var pendingSession: [SessionTab] = []
-
     private func restoreSession() {
-        if preferences.homepage.isEmpty, let first = pendingSession.first,
-           let url = URL(string: first.urlString) {
+        let entries = sessionSnapshot
+        let index = sessionSelectedIndex
+        sessionSnapshot = []
+        sessionSelectedIndex = 0
+
+        guard !entries.isEmpty else {
+            if !preferences.homepage.isEmpty,
+               let url = URLResolver.destination(for: preferences.homepage, engine: currentSearchEngine) {
+                openTab(url: url, select: true)
+            } else {
+                openTab(url: nil, select: true)
+            }
+            return
+        }
+
+        for entry in entries {
             let tab = BrowserTab(
                 model: self,
                 isPrivate: false,
                 desktopMode: preferences.desktopModeByDefault,
                 configuration: makeConfiguration(isPrivate: false)
             )
-            tab.urlString = first.urlString
-            tab.title = first.title
+            tab.urlString = entry.urlString
+            tab.title = entry.title.isEmpty ? "New Tab" : entry.title
+            tab.groupID = entry.groupID
             tabs.append(tab)
-            selectedTabID = tab.id
-            tab.ensureLoaded()
-            _ = url
-        } else if let url = URLResolver.destination(for: preferences.homepage, engine: currentSearchEngine),
-                  !preferences.homepage.isEmpty {
-            openTab(url: url, select: true)
-        } else {
-            openTab(url: nil, select: true)
+        }
+        let selected = min(max(0, index), tabs.count - 1)
+        selectedTabID = tabs[selected].id
+        tabs[selected].ensureLoaded()
+    }
+
+    // MARK: Browsing data
+
+    /// Chrome's "Clear browsing data": history, cookies, caches and site data.
+    /// Downloaded files stay on disk; the list entry is what goes.
+    func clearBrowsingData(includeDownloadsList: Bool = false) {
+        let store = WKWebsiteDataStore.default()
+        store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
+            AppLog.write("website data cleared", tag: "privacy")
+        }
+        history.removeAll()
+        permissions.removeAll()
+        if includeDownloadsList {
+            downloads.removeAll()
+        }
+        scheduleSave()
+    }
+
+    // MARK: Extension host surface
+
+    var extensionTabs: [ExtensionTabInfo] {
+        tabs.enumerated().map { index, tab in
+            ExtensionTabInfo(
+                id: index + 1,
+                url: tab.urlString,
+                title: tab.snapshotTitle(),
+                isActive: tab.id == selectedTabID,
+                isPrivate: tab.isPrivate,
+                webView: tab.webView
+            )
         }
     }
 
-    // MARK: Extension wiring
+    func extensionOpenTab(url: URL, active: Bool) {
+        openTab(url: url, select: active)
+    }
 
-    private func wireExtensionRuntime() {
-        extensions.tabInfoProvider = { [weak self] record in
-            guard let self, let tab = self.currentTab else { return [] }
-            var info: [String: Any] = [
-                "id": 0,
-                "active": true,
-                "windowId": 0,
-                "index": 0,
-                "incognito": tab.isPrivate,
-                "title": tab.snapshotTitle()
-            ]
-            let broad = record.grants.contains("<all_urls>") || !record.grants.isEmpty
-            if broad, !tab.urlString.isEmpty {
-                info["url"] = tab.urlString
+    func extensionUpdateTab(id: Int, url: URL?) {
+        guard let tab = tab(id: id) else { return }
+        if let url { tab.load(url) }
+        selectedTabID = tab.id
+    }
+
+    func extensionReloadTab(id: Int) {
+        tab(id: id)?.reload()
+    }
+
+    func extensionCloseTab(id: Int) {
+        guard let tab = tab(id: id) else { return }
+        closeTab(tab)
+    }
+
+    func extensionEvaluateInTab(id: Int, script: String, inContentWorld: Bool, completion: @escaping (Any?) -> Void) {
+        guard let tab = tab(id: id) else {
+            completion(nil)
+            return
+        }
+        if inContentWorld {
+            tab.webView.evaluateJavaScript(script, in: nil, in: contentWorld) { result, error in
+                if let error { AppLog.write("scripting.executeScript failed: \(error.localizedDescription)", tag: "ext") }
+                completion(result)
             }
-            return [info]
+        } else {
+            tab.webView.evaluateJavaScript(script) { result, error in
+                if let error { AppLog.write("scripting.executeScript failed: \(error.localizedDescription)", tag: "ext") }
+                completion(result)
+            }
         }
-        extensions.openTabHandler = { [weak self] url in
-            self?.openTab(url: url, select: true)
-        }
+    }
+
+    func tab(id: Int) -> BrowserTab? {
+        guard id > 0, tabs.indices.contains(id - 1) else { return nil }
+        return tabs[id - 1]
+    }
+
+    var activeContentWebView: WKWebView? {
+        guard let currentTab, !currentTab.isPrivate else { return nil }
+        return currentTab.webView
+    }
+
+    func dispatchToContent(_ payloadJSON: String) {
+        guard let webView = activeContentWebView else { return }
+        let script = "window.__chromexDispatch && window.__chromexDispatch(0, \(JSBridge.literal(payloadJSON)));"
+        webView.evaluateJavaScript(script, in: nil, in: contentWorld, completionHandler: nil)
+    }
+
+    func notifyContentStorageChanged(_ changesJSON: String) {
+        guard let webView = activeContentWebView else { return }
+        webView.evaluateJavaScript(
+            "window.__chromexStorageChanged && window.__chromexStorageChanged(\(JSBridge.literal(changesJSON)));",
+            in: nil,
+            in: contentWorld,
+            completionHandler: nil
+        )
     }
 
     // MARK: Persistence
@@ -422,7 +607,8 @@ final class AppModel: ObservableObject {
         customEngines = state.customEngines
         groups = state.groups
         preferences = state.preferences
-        pendingSession = state.session
+        sessionSnapshot = state.session
+        sessionSelectedIndex = state.sessionIndex ?? 0
     }
 
     private func scheduleSave() {
@@ -435,6 +621,7 @@ final class AppModel: ObservableObject {
     }
 
     func saveNow() {
+        persistSession()
         let state = PersistedState(
             bookmarks: bookmarks,
             history: history,
@@ -443,7 +630,8 @@ final class AppModel: ObservableObject {
             customEngines: customEngines,
             groups: groups,
             preferences: preferences,
-            session: pendingSession
+            session: sessionSnapshot,
+            sessionIndex: sessionSelectedIndex
         )
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: stateURL, options: .atomic)

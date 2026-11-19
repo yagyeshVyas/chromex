@@ -154,14 +154,14 @@ final class ManifestTests: XCTestCase {
     func testAnalyzerFlagsUnsupportedPermission() {
         let json = """
         {"manifest_version": 3, "name": "x", "version": "1",
-         "permissions": ["alarms"], "content_scripts": [{"matches": ["https://a.com/*"], "js": ["a.js"]}]}
+         "permissions": ["cookies"], "content_scripts": [{"matches": ["https://a.com/*"], "js": ["a.js"]}]}
         """
         guard let manifest = try? ManifestParser.parse(data: Data(json.utf8)) else {
             return XCTFail("manifest should parse")
         }
         let report = CompatibilityAnalyzer.analyze(manifest)
         XCTAssertEqual(report.verdict, .runsWithLimits)
-        XCTAssertTrue(report.unsupported.contains("alarms"))
+        XCTAssertTrue(report.unsupported.contains("cookies"))
     }
 
     func testAnalyzerRefusesWebRequestBlocking() {

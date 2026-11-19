@@ -38,9 +38,14 @@ enum JSBridge {
 
 // MARK: - chromex-extension:// scheme
 
-/// Serves packaged extension resources. This is a private scheme, not a secure
-/// context: extension pages therefore avoid `crypto.subtle` and service workers,
-/// and the UI says so where it matters.
+/// Serves packaged extension resources.
+///
+/// The scheme is not a WebKit "secure context", so extension code that probes
+/// `crypto.subtle` gets a JavaScript implementation supplied by the page shim
+/// instead. Responses carry permissive CORS headers because ES-module scripts in
+/// the analysed extensions use `crossorigin`, and a custom-scheme module fetch
+/// without `Access-Control-Allow-Origin` is rejected by WebKit before the page
+/// renders — which is what made React/Vue extension popups open blank.
 @MainActor
 final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler {
     static let scheme = "chromex-extension"
@@ -65,7 +70,7 @@ final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler
             return
         }
 
-        var relative = url.path
+        var relative = url.path.removingPercentEncoding ?? url.path
         if relative.isEmpty || relative == "/" { relative = "/index.html" }
         let candidate = root.appendingPathComponent(String(relative.dropFirst())).standardizedFileURL
         let rootPath = root.path
@@ -92,16 +97,26 @@ final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler
             "Content-Type": Self.mimeType(for: fileURL.pathExtension),
             "Content-Length": String(data.count),
             "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff"
+            "X-Content-Type-Options": "nosniff",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin"
         ]
         if fileURL.pathExtension.lowercased() == "html" || fileURL.pathExtension.lowercased() == "htm" {
-            // Remote script is refused; packaged resources are the only scripts.
+            // Extension pages are local, user-installed code. They get the same
+            // freedom Chrome gives an extension page (remote fonts, inline style,
+            // module chunks) while frames and top navigation stay scoped.
             headers["Content-Security-Policy"] =
-                "default-src 'self' chromex-extension: data: blob:; " +
-                "script-src 'self' chromex-extension:; " +
-                "style-src 'self' 'unsafe-inline' chromex-extension:; " +
-                "img-src 'self' chromex-extension: data: blob:; " +
-                "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+                "default-src * data: blob: 'unsafe-inline' 'unsafe-eval' chromex-extension:; " +
+                "script-src * data: blob: 'unsafe-inline' 'unsafe-eval' chromex-extension:; " +
+                "style-src * data: blob: 'unsafe-inline' chromex-extension:; " +
+                "font-src * data: blob:; " +
+                "img-src * data: blob:; " +
+                "connect-src * data: blob:; " +
+                "media-src * data: blob:; " +
+                "frame-src chromex-extension:; " +
+                "base-uri 'none'; frame-ancestors 'none'"
         }
 
         let response = HTTPURLResponse(
@@ -135,14 +150,24 @@ final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler
         case "js", "mjs": return "text/javascript; charset=utf-8"
         case "css": return "text/css; charset=utf-8"
         case "json": return "application/json; charset=utf-8"
+        case "map": return "application/json; charset=utf-8"
         case "svg": return "image/svg+xml"
         case "png": return "image/png"
         case "jpg", "jpeg": return "image/jpeg"
         case "gif": return "image/gif"
         case "webp": return "image/webp"
+        case "ico": return "image/x-icon"
         case "woff": return "font/woff"
         case "woff2": return "font/woff2"
         case "ttf": return "font/ttf"
+        case "otf": return "font/otf"
+        case "mp3": return "audio/mpeg"
+        case "wav": return "audio/wav"
+        case "mp4": return "video/mp4"
+        case "webm": return "video/webm"
+        case "wasm": return "application/wasm"
+        case "txt": return "text/plain; charset=utf-8"
+        case "xml": return "application/xml; charset=utf-8"
         default: return "application/octet-stream"
         }
     }
@@ -161,7 +186,7 @@ final class ExtensionBridge: NSObject, @preconcurrency WKScriptMessageHandler {
         didReceive message: WKScriptMessage
     ) {
         guard message.name == "chromexBridge", let body = message.body as? [String: Any] else { return }
-        manager?.handleBridgeMessage(body, from: message.webView)
+        manager?.handleBridgeMessage(body, from: message.webView, frame: message.frameInfo)
     }
 }
 
@@ -178,6 +203,8 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
     private(set) var isReady = false
     /// Called when a queued message is finally delivered and no listener answers it.
     var onUnhandled: ((Int) -> Void)?
+    /// Called once the background document has executed; the shim fires startup events.
+    var onReady: (() -> Void)?
 
     init(
         extensionID: String,
@@ -185,6 +212,7 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         directory: URL,
         schemeHandler: ExtensionSchemeHandler,
         bridge: ExtensionBridge,
+        nativeBridge: NativeBridge,
         token: String,
         shim: String
     ) {
@@ -197,6 +225,7 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
             WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
         configuration.userContentController.add(bridge, name: "chromexBridge")
+        configuration.userContentController.add(nativeBridge, name: "chromexNative")
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
@@ -211,6 +240,7 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
             webView.loadHTMLString(document, baseURL: base)
         }
         _ = directory
+        _ = token
     }
 
     func dispatch(requestID: Int, payloadJSON: String, completion: @escaping (String?) -> Void) {
@@ -222,9 +252,17 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         evaluate(requestID: requestID, payloadJSON: payloadJSON, completion: completion)
     }
 
+    func evaluate(_ script: String) {
+        guard isReady else { return }
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
     private func evaluate(requestID: Int, payloadJSON: String, completion: @escaping (String?) -> Void) {
         let script = "window.__chromexDispatch(\(requestID), \(JSBridge.literal(payloadJSON)));"
-        webView.evaluateJavaScript(script) { result, _ in
+        webView.evaluateJavaScript(script) { result, error in
+            if let error {
+                AppLog.write("background dispatch failed: \(error.localizedDescription)", tag: "ext")
+            }
             let value = result as? String
             Task { @MainActor in
                 completion(value)
@@ -244,23 +282,28 @@ final class ExtensionBackgroundRuntime: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Best-effort `storage.onChanged` for the background page. Content scripts
-    /// are not notified in this build and the compatibility table says so.
+    /// Best-effort `storage.onChanged` for the background page.
     func notifyStorageChanged(_ changesJSON: String) {
-        guard isReady else { return }
-        let script = "window.__chromexStorageChanged && window.__chromexStorageChanged(\(JSBridge.literal(changesJSON)));"
-        webView.evaluateJavaScript(script, completionHandler: nil)
+        evaluate("window.__chromexStorageChanged && window.__chromexStorageChanged(\(JSBridge.literal(changesJSON)));")
     }
 
     /// Fires `chrome.action.onClicked` inside the background page.
     func sendActionClicked() {
-        guard isReady else { return }
-        webView.evaluateJavaScript("window.__chromexActionClicked && window.__chromexActionClicked();", completionHandler: nil)
+        evaluate("window.__chromexActionClicked && window.__chromexActionClicked();")
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isReady = true
         flushPending()
+        onReady?()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        AppLog.write("background load failed: \(error.localizedDescription)", tag: "ext")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        AppLog.write("background load failed: \(error.localizedDescription)", tag: "ext")
     }
 
     func stop() {

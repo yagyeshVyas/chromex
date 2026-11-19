@@ -139,7 +139,7 @@ FIXTURES_DATA: dict[str, dict] = {
     "unsupported-api": {
         "manifest": manifest(
             name="Needs Unavailable APIs",
-            permissions=["alarms", "cookies"],
+            permissions=["cookies", "identity"],
             content_scripts=[{"matches": ["https://example.com/*"], "js": ["content.js"]}],
         ),
         "files": {"content.js": "1;\n"},

@@ -211,11 +211,16 @@ struct DownloadsView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textSecondary)
                 .frame(width: 26)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.filename)
                     .font(ChromexFont.callout)
                     .foregroundStyle(ChromexColor.textPrimary)
                     .lineLimit(1)
+                if item.state == .inProgress {
+                    ProgressView(value: min(max(item.progress, 0), 1))
+                        .tint(ChromexColor.electricBlue)
+                        .frame(maxWidth: 180)
+                }
                 Text(subtitle(for: item))
                     .font(ChromexFont.caption)
                     .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textTertiary)
@@ -324,8 +329,12 @@ struct SettingsView: View {
             }
             Toggle("Desktop site by default", isOn: desktopBinding)
                 .tint(ChromexColor.electricBlue)
+            Toggle("Show bookmarks bar", isOn: bookmarksBarBinding)
+                .tint(ChromexColor.electricBlue)
         } header: {
             Text("Display")
+        } footer: {
+            Text("Desktop mode sends a desktop Chrome user agent, so sites serve their desktop layout.")
         }
     }
 
@@ -370,19 +379,25 @@ struct SettingsView: View {
 
     private var dataSection: some View {
         Section {
+            Button("Clear browsing data", role: .destructive) {
+                model.clearBrowsingData()
+            }
             Button("Clear history", role: .destructive) { model.clearHistory() }
             Button("Clear downloads list", role: .destructive) {
                 for item in model.downloads { model.removeDownload(item) }
             }
         } header: {
             Text("Data")
+        } footer: {
+            Text("Clearing browsing data removes cookies, site data and cached files for every site.")
         }
     }
 
     private var aboutSection: some View {
         Section {
-            aboutRow("Version", "1.0.0")
+            aboutRow("Version", "2.0.0")
             aboutRow("Engine", "WebKit / WKWebView")
+            aboutRow("Desktop user agent", "Chrome 131")
             aboutRow("Extensions", "\(model.extensions.installed.count) installed")
         } header: {
             Text("About CHROMEX")
@@ -424,6 +439,13 @@ struct SettingsView: View {
         Binding(
             get: { model.preferences.desktopModeByDefault },
             set: { model.preferences.desktopModeByDefault = $0 }
+        )
+    }
+
+    private var bookmarksBarBinding: Binding<Bool> {
+        Binding(
+            get: { model.preferences.showBookmarksBar },
+            set: { model.preferences.showBookmarksBar = $0 }
         )
     }
 

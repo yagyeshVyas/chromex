@@ -7,7 +7,7 @@
 | Manifest version | 3 |
 | Name | Needs Unavailable APIs |
 | Version | 1.0.0 |
-| Declared permissions | alarms, cookies |
+| Declared permissions | cookies, identity |
 | Host patterns | https://example.com/* |
 | Content scripts | 1 |
 | Background | none |
@@ -19,12 +19,12 @@
 - Score: 80/100
 - Broad host access: no
 - Supported APIs: content_scripts
-- Unsupported APIs: alarms, cookies
+- Unsupported APIs: cookies, identity
 
 | API | Status | Note |
 |---|---|---|
-| alarms | unsupported | Declared but not implemented in this build. |
 | cookies | unsupported | Declared but not implemented in this build. |
+| identity | unsupported | Declared but not implemented in this build. |
 
 ## Execution results (device required)
 

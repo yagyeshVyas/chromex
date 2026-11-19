@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import WebKit
 
 // MARK: - Installed record
@@ -19,17 +20,38 @@ struct InstalledExtension: Identifiable, Codable, Sendable, Hashable {
         try? ManifestParser.parse(data: manifestData)
     }
 
+    var manifestJSON: String? {
+        String(data: manifestData, encoding: .utf8)
+    }
+
+    var manifestObject: [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: manifestData)) as? [String: Any]
+    }
+
     /// Host patterns the user consented to: declared hosts plus content-script matches.
     static func requestedGrants(for manifest: ExtensionManifest) -> [String] {
         manifest.requestedHostPatterns
     }
 }
 
+// MARK: - Injection description
+
 /// A script ready to be turned into a `WKUserScript`.
 struct ScriptInjection: Sendable, Hashable {
     var source: String
     var runAt: RunAt
     var allFrames: Bool
+    var world: ContentWorldKind = .isolated
+}
+
+/// A live tab as extensions see it.
+struct ExtensionTabInfo {
+    var id: Int
+    var url: String
+    var title: String
+    var isActive: Bool
+    var isPrivate: Bool
+    var webView: WKWebView
 }
 
 // MARK: - Storage
@@ -121,6 +143,14 @@ final class ExtensionStorage {
     }
 }
 
+// MARK: - Alarm bookkeeping
+
+struct AlarmSpec {
+    var name: String
+    var scheduledTime: Date
+    var periodInMinutes: Double?
+}
+
 // MARK: - Manager
 
 @MainActor
@@ -130,6 +160,9 @@ final class ExtensionManager: ObservableObject {
 
     let root: URL
     let schemeHandler = ExtensionSchemeHandler()
+
+    /// The host app. Weak so the model owns the manager, not the other way round.
+    weak var app: AppModel?
 
     private(set) lazy var bridge: ExtensionBridge = {
         let bridge = ExtensionBridge()
@@ -147,12 +180,19 @@ final class ExtensionManager: ObservableObject {
     /// the main actor every time a matching page loads.
     private var scriptCache: [String: [String: String]] = [:]
     private var localizations: [String: ExtensionLocalization] = [:]
-    private var pendingReplies: [Int: (webView: WKWebView, envelopeID: Int)] = [:]
+    private var pendingReplies: [Int: PendingReply] = [:]
     private var nextRequestID = 1
+    private var alarms: [String: [String: AlarmSpec]] = [:]
+    private var alarmTasks: [String: [String: Task<Void, Never>]] = [:]
+    private var downloadIDs: [Int: UUID] = [:]
+    private var nextDownloadID = 1
 
-    /// Supplied by the app model so extensions see real CHROMEX tabs.
-    var tabInfoProvider: ((InstalledExtension) -> [[String: Any]])?
-    var openTabHandler: ((URL) -> Void)?
+    private struct PendingReply {
+        var webView: WKWebView?
+        var frame: WKFrameInfo?
+        var context: String
+        var envelopeID: Int
+    }
 
     init(root: URL) {
         self.root = root
@@ -171,6 +211,7 @@ final class ExtensionManager: ObservableObject {
         }
         installed = records
         for record in installed where record.isEnabled {
+            schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
             scheduleRuntime(for: record)
         }
     }
@@ -217,6 +258,7 @@ final class ExtensionManager: ObservableObject {
         installed.append(record)
         persist()
         scheduleRuntime(for: record)
+        AppLog.write("extension installed: \(record.displayName) \(record.version)", tag: "ext")
         return record
     }
 
@@ -225,6 +267,7 @@ final class ExtensionManager: ObservableObject {
         schemeHandler.unregister(extensionID: record.id)
         storages[record.id] = nil
         scriptCache[record.id] = nil
+        cancelAlarms(for: record.id)
         installed.removeAll { $0.id == record.id }
         try? FileManager.default.removeItem(at: root.appendingPathComponent(record.id, isDirectory: true))
         persist()
@@ -239,6 +282,7 @@ final class ExtensionManager: ObservableObject {
         } else {
             stopRuntime(for: record.id)
             scriptCache[record.id] = nil
+            cancelAlarms(for: record.id)
         }
     }
 
@@ -267,26 +311,37 @@ final class ExtensionManager: ObservableObject {
         guard record.isEnabled, let manifest = record.manifest, manifest.backgroundKind != .none else { return }
         guard runtimes[record.id] == nil else { return }
         let token = registerToken(for: record.id)
-        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "background")
+        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "background", manifestJSON: record.manifestJSON ?? "{}")
         let runtime = ExtensionBackgroundRuntime(
             extensionID: record.id,
             manifest: manifest,
             directory: root.appendingPathComponent(record.id, isDirectory: true),
             schemeHandler: schemeHandler,
             bridge: bridge,
+            nativeBridge: NativeBridge(),
             token: token,
             shim: shim
         )
         runtimes[record.id] = runtime
+        runtime.onReady = { [weak self] in
+            self?.evaluateInAllRuntimes("window.__chromexRuntimeEvent && window.__chromexRuntimeEvent('startup', {});")
+            self?.evaluateInAllRuntimes("window.__chromexRuntimeEvent && window.__chromexRuntimeEvent('installed', { reason: 'install' });")
+        }
         runtime.onUnhandled = { [weak self] requestID in
             guard let self, let pending = self.pendingReplies.removeValue(forKey: requestID) else { return }
-            self.reply(on: pending.webView, id: pending.envelopeID, value: nil, error: nil)
+            self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
         }
     }
 
     private func stopRuntime(for identifier: String) {
         runtimes[identifier]?.stop()
         runtimes[identifier] = nil
+    }
+
+    private func evaluateInAllRuntimes(_ script: String) {
+        for runtime in runtimes.values {
+            runtime.evaluate(script)
+        }
     }
 
     func makePopupWebView(for record: InstalledExtension) -> WKWebView? {
@@ -297,11 +352,14 @@ final class ExtensionManager: ObservableObject {
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: ExtensionSchemeHandler.scheme)
         let token = registerToken(for: record.id)
-        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "popup")
+        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "popup", manifestJSON: record.manifestJSON ?? "{}")
         configuration.userContentController.addUserScript(
             WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
         configuration.userContentController.add(bridge, name: "chromexBridge")
+        let native = NativeBridge()
+        configuration.userContentController.add(native, name: "chromexNative")
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         let urlString = "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(popup)"
@@ -319,11 +377,14 @@ final class ExtensionManager: ObservableObject {
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: ExtensionSchemeHandler.scheme)
         let token = registerToken(for: record.id)
-        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "options")
+        let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "options", manifestJSON: record.manifestJSON ?? "{}")
         configuration.userContentController.addUserScript(
             WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
         configuration.userContentController.add(bridge, name: "chromexBridge")
+        let native = NativeBridge()
+        configuration.userContentController.add(native, name: "chromexNative")
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         if let url = URL(string: "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(options)") {
@@ -406,15 +467,39 @@ final class ExtensionManager: ObservableObject {
                 }
                 guard isGranted(record: record, patterns: script.matches) else { continue }
 
+                if script.world == .main {
+                    // Chrome runs MAIN-world scripts in the page's own context with
+                    // no extension APIs; injection is the raw source, no shim.
+                    for path in script.css {
+                        guard let css = readText(path, in: directory, extensionID: record.id) else { continue }
+                        result.append(ScriptInjection(
+                            source: styleInjectionSource(css: css),
+                            runAt: script.runAt,
+                            allFrames: script.allFrames,
+                            world: .main
+                        ))
+                    }
+                    for path in script.js {
+                        guard let source = readText(path, in: directory, extensionID: record.id) else { continue }
+                        result.append(ScriptInjection(
+                            source: source,
+                            runAt: script.runAt,
+                            allFrames: script.allFrames,
+                            world: .main
+                        ))
+                    }
+                    continue
+                }
+
                 let token = registerToken(for: record.id)
-                let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "content")
+                let shim = ExtensionShim.source(token: token, extensionID: record.id, context: "content", manifestJSON: record.manifestJSON ?? "{}")
                 result.append(ScriptInjection(source: shim, runAt: .documentStart, allFrames: script.allFrames))
 
                 for path in script.css {
                     guard let css = readText(path, in: directory, extensionID: record.id) else { continue }
                     result.append(ScriptInjection(
                         source: styleInjectionSource(css: css),
-                        runAt: .documentStart,
+                        runAt: script.runAt,
                         allFrames: script.allFrames
                     ))
                 }
@@ -464,9 +549,21 @@ final class ExtensionManager: ObservableObject {
         return patterns.contains { record.grants.contains($0) }
     }
 
+    // MARK: Navigation events
+
+    func navigationDidFinish(urlString: String, isPrivate: Bool) {
+        guard !isPrivate, !runtimes.isEmpty else { return }
+        let payload: [String: Any] = ["url": urlString, "tabId": 0]
+        let json = JSBridge.stringify(payload)
+        for runtime in runtimes.values {
+            runtime.evaluate("window.__chromexTabUpdated && window.__chromexTabUpdated(\(JSBridge.literal(json)));")
+            runtime.evaluate("window.__chromexNavigation && window.__chromexNavigation(\(JSBridge.literal(json)));")
+        }
+    }
+
     // MARK: Bridge
 
-    func handleBridgeMessage(_ body: [String: Any], from webView: WKWebView?) {
+    func handleBridgeMessage(_ body: [String: Any], from webView: WKWebView?, frame: WKFrameInfo?) {
         guard let token = body["token"] as? String,
               let identifier = extensionID(for: token),
               let record = installed.first(where: { $0.id == identifier }),
@@ -477,119 +574,385 @@ final class ExtensionManager: ObservableObject {
         let envelopeID = (body["id"] as? NSNumber)?.intValue ?? (body["id"] as? Int) ?? 0
         let api = body["api"] as? String ?? ""
         let payload = body["payload"] as? [String: Any] ?? [:]
+        let context = body["ctx"] as? String ?? "content"
         let extensionStorage = storage(for: record)
+
+        func respond(_ value: Any?, _ error: String? = nil) {
+            reply(on: webView, frame: frame, id: envelopeID, value: value, error: error, context: context)
+        }
 
         switch api {
         case "storage.get":
-            let keys = payload["keys"]
-            reply(on: webView, id: envelopeID, value: extensionStorage.snapshot(for: keys), error: nil)
+            respond(extensionStorage.snapshot(for: payload["keys"]))
 
         case "storage.set":
             guard let items = payload["items"] as? [String: Any] else {
-                reply(on: webView, id: envelopeID, value: nil, error: "storage.set expects an object")
+                respond(nil, "storage.set expects an object")
                 return
             }
             let changes = extensionStorage.set(items)
             notifyStorageChanged(identifier, changes: changes)
-            reply(on: webView, id: envelopeID, value: [:], error: nil)
+            respond([:])
 
         case "storage.remove":
             let keys = (payload["keys"] as? [String]) ?? []
             let changes = extensionStorage.remove(keys)
             notifyStorageChanged(identifier, changes: changes)
-            reply(on: webView, id: envelopeID, value: [:], error: nil)
+            respond([:])
 
         case "storage.clear":
             let changes = extensionStorage.clear()
             notifyStorageChanged(identifier, changes: changes)
-            reply(on: webView, id: envelopeID, value: [:], error: nil)
+            respond([:])
 
         case "storage.bytes":
-            reply(on: webView, id: envelopeID, value: extensionStorage.byteCount(), error: nil)
+            respond(extensionStorage.byteCount())
 
         case "tabs.query":
-            let tabs = tabInfoProvider?(record) ?? []
-            reply(on: webView, id: envelopeID, value: tabs, error: nil)
+            let query = payload["query"] as? [String: Any] ?? [:]
+            respond(tabsPayload(matching: query))
 
         case "tabs.create":
-            if let options = payload["options"] as? [String: Any],
-               let urlString = options["url"] as? String,
-               let url = URL(string: urlString) {
-                openTabHandler?(url)
-                reply(on: webView, id: envelopeID, value: [:], error: nil)
-            } else {
-                reply(on: webView, id: envelopeID, value: nil, error: "tabs.create expects { url }")
+            let options = payload["options"] as? [String: Any] ?? [:]
+            guard let urlString = options["url"] as? String, let url = URL(string: urlString) else {
+                respond(nil, "tabs.create expects { url }")
+                return
             }
+            let active = options["active"] as? Bool ?? true
+            app?.extensionOpenTab(url: url, active: active)
+            respond(tabPayload(for: app?.extensionTabs.first { $0.url == urlString }))
+
+        case "tabs.update":
+            let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
+            let urlString = payload["url"] as? String
+            let url = urlString.flatMap { URL(string: $0) }
+            app?.extensionUpdateTab(id: tabID, url: url)
+            respond([:])
+
+        case "tabs.reload":
+            let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
+            app?.extensionReloadTab(id: tabID)
+            respond([:])
+
+        case "tabs.remove":
+            let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
+            app?.extensionCloseTab(id: tabID)
+            respond([:])
+
+        case "tabs.sendMessage":
+            let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
+            let message = payload["message"]
+            let requestID = nextRequestID
+            nextRequestID += 1
+            pendingReplies[requestID] = PendingReply(
+                webView: webView,
+                frame: frame,
+                context: context,
+                envelopeID: envelopeID
+            )
+            let json = JSBridge.stringify(message)
+            app?.extensionEvaluateInTab(id: tabID, script: "window.__chromexDispatch && window.__chromexDispatch(\(requestID), \(JSBridge.literal(json)));", inContentWorld: true) { result in
+                if (result as? String) == "__none__", let pending = self.pendingReplies.removeValue(forKey: requestID) {
+                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
+                }
+            }
+
+        case "scripting.executeScript":
+            handleExecuteScript(payload: payload, record: record, respond: respond)
+
+        case "scripting.insertCSS":
+            let css = payload["css"] as? String ?? ""
+            let tabID = (payload["tabId"] as? NSNumber)?.intValue ?? 0
+            app?.extensionEvaluateInTab(id: tabID, script: styleInjectionSource(css: css), inContentWorld: true) { _ in }
+            respond([:])
 
         case "i18n.getMessage":
             let name = payload["name"] as? String ?? ""
             let substitutions = payload["substitutions"] as? [String] ?? []
-            let value = localization(for: record)?.message(for: name, substitutions: substitutions)
-            reply(on: webView, id: envelopeID, value: value, error: nil)
+            respond(localization(for: record)?.message(for: name, substitutions: substitutions))
 
         case "i18n.getAcceptLanguages":
-            reply(on: webView, id: envelopeID, value: ["en-US", "en"], error: nil)
+            respond(["en-US", "en"])
 
         case "permissions.contains", "permissions.request":
-            let requested = payload["permissions"] as? [String: Any] ?? [:]
-            reply(on: webView, id: envelopeID, value: permissionsSatisfied(requested, by: record), error: nil)
+            respond(permissionsSatisfied(payload["permissions"] as? [String: Any] ?? [:], by: record))
 
         case "permissions.getAll":
-            reply(on: webView, id: envelopeID, value: [
+            respond([
                 "permissions": record.manifest?.permissions ?? [],
                 "origins": record.grants
-            ], error: nil)
+            ])
 
         case "runtime.sendMessage":
-            let message = payload["message"]
-            forwardRuntimeMessage(message, from: webView, envelopeID: envelopeID, to: identifier)
+            forwardRuntimeMessage(payload["message"], from: webView, frame: frame, envelopeID: envelopeID, context: context, to: identifier)
 
         case "runtime.response":
             let requestID = (payload["requestId"] as? NSNumber)?.intValue ?? (payload["requestId"] as? Int) ?? -1
             guard let pending = pendingReplies.removeValue(forKey: requestID) else { return }
-            reply(on: pending.webView, id: pending.envelopeID, value: payload["value"], error: nil)
+            reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: payload["value"], error: nil, context: pending.context)
+
+        case "runtime.getManifest":
+            respond(record.manifestObject)
+
+        case "runtime.getPlatformInfo":
+            respond([
+                "os": "ios",
+                "arch": "arm64",
+                "nacl_arch": "",
+                "manifestVersion": record.manifest?.manifestVersion ?? 3
+            ])
+
+        case "runtime.getURL":
+            let path = payload["path"] as? String ?? ""
+            respond("\(ExtensionSchemeHandler.scheme)://\(record.id)/\(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))")
+
+        case "alarms.create":
+            createAlarm(payload: payload, record: record)
+            respond([:])
+
+        case "alarms.clear":
+            let name = payload["name"] as? String ?? ""
+            clearAlarm(extensionID: record.id, name: name)
+            respond(true)
+
+        case "alarms.clearAll":
+            cancelAlarms(for: record.id)
+            respond(true)
+
+        case "alarms.getAll":
+            respond(alarmsPayload(for: record))
+
+        case "downloads.download":
+            guard let urlString = payload["url"] as? String, let url = URL(string: urlString) else {
+                respond(nil, "downloads.download expects { url }")
+                return
+            }
+            let id = nextDownloadID
+            nextDownloadID += 1
+            if let itemID = app?.startURLSessionDownload(url) {
+                downloadIDs[id] = itemID
+            }
+            respond(id)
+
+        case "system.cpu":
+            respond([
+                "numOfProcessors": ProcessInfo.processInfo.processorCount,
+                "archName": "arm64",
+                "modelName": ""
+            ])
+
+        case "system.memory":
+            respond([
+                "capacity": ProcessInfo.processInfo.physicalMemory,
+                "availableCapacity": 0
+            ])
+
+        case "declarativeNetRequest.getDynamicRules", "declarativeNetRequest.getSessionRules":
+            respond([Any]())
+
+        case "declarativeNetRequest.isRegexSupported":
+            respond(["isSupported": false])
+
+        case "offscreen.createDocument", "offscreen.closeDocument":
+            respond([:])
 
         case "log":
             appendDiagnostic("\(record.displayName): \(payload["message"] as? String ?? "")")
 
         default:
-            reply(on: webView, id: envelopeID, value: nil, error: "Unsupported API: \(api)")
+            respond(nil, "Unsupported API: \(api)")
         }
     }
 
-    private func forwardRuntimeMessage(_ message: Any?, from webView: WKWebView?, envelopeID: Int, to identifier: String) {
+    private func handleExecuteScript(
+        payload: [String: Any],
+        record: InstalledExtension,
+        respond: @escaping (Any?, String?) -> Void
+    ) {
+        let tabID = ((payload["target"] as? [String: Any])?["tabId"] as? NSNumber)?.intValue ?? 0
+        let worldID = payload["worldId"] as? String ?? "ISOLATED"
+        let directory = root.appendingPathComponent(record.id, isDirectory: true)
+
+        var code = payload["code"] as? String
+        if code == nil, let function = payload["func"] as? String {
+            code = "(\(function))();"
+        }
+        if code == nil, let files = payload["files"] as? [String], let first = files.first {
+            code = readText(first, in: directory, extensionID: record.id)
+        }
+        guard let script = code else {
+            respond(nil, "scripting.executeScript needs files, code or func")
+            return
+        }
+
+        app?.extensionEvaluateInTab(id: tabID, script: script, inContentWorld: worldID != "MAIN") { result in
+            respond([["frameId": 0, "result": result ?? NSNull()]])
+        }
+    }
+
+    private func tabsPayload(matching query: [String: Any]) -> [[String: Any]] {
+        guard let tabs = app?.extensionTabs else { return [] }
+        let wantActive = query["active"] as? Bool
+        return tabs.compactMap { tab in
+            if let wantActive, tab.isActive != wantActive { return nil }
+            return tabPayload(for: tab)
+        }
+    }
+
+    private func tabPayload(for tab: ExtensionTabInfo?) -> [String: Any] {
+        guard let tab else { return [:] }
+        return [
+            "id": tab.id,
+            "index": tab.id - 1,
+            "windowId": 0,
+            "active": tab.isActive,
+            "highlighted": tab.isActive,
+            "incognito": tab.isPrivate,
+            "url": tab.url,
+            "title": tab.title,
+            "status": "complete"
+        ]
+    }
+
+    // MARK: Alarms
+
+    private func createAlarm(payload: [String: Any], record: InstalledExtension) {
+        var name = payload["name"] as? String ?? ""
+        var delay = payload["delayInMinutes"] as? Double
+        var period = payload["periodInMinutes"] as? Double
+        if name.isEmpty, let info = payload["info"] as? [String: Any] {
+            delay = info["delayInMinutes"] as? Double
+            period = info["periodInMinutes"] as? Double
+        }
+        if delay == nil, let period { delay = period }
+        if name.isEmpty { name = "chromex-alarm-\(UUID().uuidString.prefix(6))" }
+
+        let interval = (delay ?? 1) * 60
+        let spec = AlarmSpec(
+            name: name,
+            scheduledTime: Date().addingTimeInterval(interval),
+            periodInMinutes: period
+        )
+        alarms[record.id, default: [:]][name] = spec
+        scheduleAlarm(extensionID: record.id, name: name, after: interval)
+    }
+
+    private func scheduleAlarm(extensionID: String, name: String, after seconds: TimeInterval) {
+        clearAlarm(extensionID: extensionID, name: name, keepSpec: true)
+        let task = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(max(1, seconds)))
+            guard !Task.isCancelled else { return }
+            self?.fireAlarm(extensionID: extensionID, name: name)
+        }
+        alarmTasks[extensionID, default: [:]][name] = task
+    }
+
+    private func fireAlarm(extensionID: String, name: String) {
+        guard let runtime = runtimes[extensionID] else { return }
+        let json = JSBridge.stringify(["name": name])
+        runtime.evaluate("window.__chromexAlarm && window.__chromexAlarm(\(JSBridge.literal(json)));")
+
+        guard let spec = alarms[extensionID]?[name], let period = spec.periodInMinutes else {
+            alarms[extensionID]?[name] = nil
+            alarmTasks[extensionID]?[name] = nil
+            return
+        }
+        alarms[extensionID]?[name]?.scheduledTime = Date().addingTimeInterval(period * 60)
+        scheduleAlarm(extensionID: extensionID, name: name, after: period * 60)
+    }
+
+    private func clearAlarm(extensionID: String, name: String, keepSpec: Bool = false) {
+        alarmTasks[extensionID]?[name]?.cancel()
+        alarmTasks[extensionID]?[name] = nil
+        if !keepSpec {
+            alarms[extensionID]?[name] = nil
+        }
+    }
+
+    private func cancelAlarms(for extensionID: String) {
+        alarmTasks[extensionID]?.values.forEach { $0.cancel() }
+        alarmTasks[extensionID] = nil
+        alarms[extensionID] = nil
+    }
+
+    private func alarmsPayload(for record: InstalledExtension) -> [[String: Any]] {
+        (alarms[record.id] ?? [:]).values.map { spec in
+            var entry: [String: Any] = [
+                "name": spec.name,
+                "scheduledTime": spec.scheduledTime.timeIntervalSince1970 * 1000
+            ]
+            if let period = spec.periodInMinutes {
+                entry["periodInMinutes"] = period
+            } else {
+                entry["periodInMinutes"] = NSNull()
+            }
+            return entry
+        }
+    }
+
+    // MARK: Messaging
+
+    private func forwardRuntimeMessage(
+        _ message: Any?,
+        from webView: WKWebView?,
+        frame: WKFrameInfo?,
+        envelopeID: Int,
+        context: String,
+        to identifier: String
+    ) {
         guard let webView else { return }
         guard let runtime = runtimes[identifier] else {
-            reply(on: webView, id: envelopeID, value: nil, error: "This extension has no running background page.")
+            reply(on: webView, frame: frame, id: envelopeID, value: nil, error: "This extension has no running background page.", context: context)
             return
         }
 
         let requestID = nextRequestID
         nextRequestID += 1
-        pendingReplies[requestID] = (webView, envelopeID)
+        pendingReplies[requestID] = PendingReply(webView: webView, frame: frame, context: context, envelopeID: envelopeID)
 
         let payloadJSON = JSBridge.stringify(message)
         runtime.dispatch(requestID: requestID, payloadJSON: payloadJSON) { [weak self] result in
             guard let self else { return }
             if result == "__none__" {
                 if let pending = self.pendingReplies.removeValue(forKey: requestID) {
-                    self.reply(on: pending.webView, id: pending.envelopeID, value: nil, error: nil)
+                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
                 }
             }
         }
     }
 
     private func notifyStorageChanged(_ identifier: String, changes: [String: Any]) {
-        guard !changes.isEmpty, let runtime = runtimes[identifier] else { return }
-        runtime.notifyStorageChanged(JSBridge.stringify(changes))
+        guard !changes.isEmpty else { return }
+        let json = JSBridge.stringify(changes)
+        if let runtime = runtimes[identifier] {
+            runtime.notifyStorageChanged(json)
+        }
+        app?.notifyContentStorageChanged(json)
     }
 
-    private func reply(on webView: WKWebView?, id: Int, value: Any?, error: String?) {
+    private func reply(
+        on webView: WKWebView?,
+        frame: WKFrameInfo?,
+        id: Int,
+        value: Any?,
+        error: String?,
+        context: String
+    ) {
         guard let webView else { return }
         let json = JSBridge.stringify(value)
         let errorLiteral = error.map(JSBridge.literal) ?? "null"
         let script = "window.__chromexReply(\(id), \(JSBridge.literal(json)), \(errorLiteral));"
-        webView.evaluateJavaScript(script, completionHandler: nil)
+
+        if context == "content" {
+            webView.evaluateJavaScript(script, in: frame, in: app?.contentWorld ?? .page) { [weak webView] _, failed in
+                guard failed != nil else { return }
+                // A stale frame snapshot fails; retry in the main frame so the
+                // caller still gets an answer instead of hanging.
+                webView?.evaluateJavaScript(script, in: nil, in: app?.contentWorld ?? .page, completionHandler: nil)
+            }
+        } else {
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
     }
 
     // MARK: Diagnostics
@@ -599,6 +962,7 @@ final class ExtensionManager: ObservableObject {
         if diagnostics.count > 200 {
             diagnostics.removeFirst(diagnostics.count - 200)
         }
+        AppLog.write(message, tag: "ext")
     }
 
     func clearDiagnostics() {

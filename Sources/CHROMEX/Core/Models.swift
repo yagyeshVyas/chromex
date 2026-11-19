@@ -52,6 +52,51 @@ struct DownloadItem: Identifiable, Codable, Hashable, Sendable {
     var createdAt: Date = Date()
     var localPath: String?
     var errorMessage: String?
+    /// 0...1 while a WebKit download is running. Not persisted: a relaunch cannot
+    /// resume a transfer, so the value is only meaningful for the live session.
+    var progress: Double = 0
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case filename
+        case sourceURLString
+        case state
+        case byteCount
+        case createdAt
+        case localPath
+        case errorMessage
+    }
+
+    init(filename: String, sourceURLString: String, state: State) {
+        self.filename = filename
+        self.sourceURLString = sourceURLString
+        self.state = state
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        filename = try container.decodeIfPresent(String.self, forKey: .filename) ?? "download"
+        sourceURLString = try container.decodeIfPresent(String.self, forKey: .sourceURLString) ?? ""
+        state = try container.decodeIfPresent(State.self, forKey: .state) ?? .failed
+        byteCount = try container.decodeIfPresent(Int64.self, forKey: .byteCount) ?? 0
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        localPath = try container.decodeIfPresent(String.self, forKey: .localPath)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        progress = 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(filename, forKey: .filename)
+        try container.encode(sourceURLString, forKey: .sourceURLString)
+        try container.encode(state, forKey: .state)
+        try container.encode(byteCount, forKey: .byteCount)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(localPath, forKey: .localPath)
+        try container.encodeIfPresent(errorMessage, forKey: .errorMessage)
+    }
 }
 
 // MARK: - Search
@@ -156,12 +201,42 @@ enum AppTheme: String, Codable, CaseIterable, Sendable {
 }
 
 /// Preferences that must be readable before any view exists.
+///
+/// Decoded field by field so a state file written by an older build keeps every
+/// preference instead of failing the whole `PersistedState` decode.
 struct AppPreferences: Codable, Sendable {
     var searchEngineID: UUID = SearchEngine.builtIns[0].id
     var homepage: String = ""
-    var theme: AppTheme = .dark
+    var theme: AppTheme = .system
     var blockAdsAndTrackers: Bool = true
     var desktopModeByDefault: Bool = false
     var customUserAgent: String = ""
     var openLinksInNewTab: Bool = false
+    var showBookmarksBar: Bool = true
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case searchEngineID
+        case homepage
+        case theme
+        case blockAdsAndTrackers
+        case desktopModeByDefault
+        case customUserAgent
+        case openLinksInNewTab
+        case showBookmarksBar
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        searchEngineID = try container.decodeIfPresent(UUID.self, forKey: .searchEngineID)
+            ?? SearchEngine.builtIns[0].id
+        homepage = try container.decodeIfPresent(String.self, forKey: .homepage) ?? ""
+        theme = try container.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .system
+        blockAdsAndTrackers = try container.decodeIfPresent(Bool.self, forKey: .blockAdsAndTrackers) ?? true
+        desktopModeByDefault = try container.decodeIfPresent(Bool.self, forKey: .desktopModeByDefault) ?? false
+        customUserAgent = try container.decodeIfPresent(String.self, forKey: .customUserAgent) ?? ""
+        openLinksInNewTab = try container.decodeIfPresent(Bool.self, forKey: .openLinksInNewTab) ?? false
+        showBookmarksBar = try container.decodeIfPresent(Bool.self, forKey: .showBookmarksBar) ?? true
+    }
 }

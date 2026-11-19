@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "description": "CHROMEX QA fixture",
   "permissions": [
-    "alarms",
-    "cookies"
+    "cookies",
+    "identity"
   ],
   "content_scripts": [
     {

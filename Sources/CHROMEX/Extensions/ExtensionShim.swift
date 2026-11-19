@@ -1,17 +1,20 @@
 import Foundation
 
-/// The JavaScript bridge injected into content scripts, popups and background pages.
+/// The JavaScript bridge injected into content scripts, popups, options pages and
+/// background pages.
 ///
-/// Two properties matter more than the API surface:
+/// Three properties matter more than the API surface:
 ///
 /// 1. The capability `token` is substituted into the shim's closure at injection
-///    time. Page JavaScript can call `chrome.runtime.sendMessage`, but it cannot
-///    read the token, so it cannot impersonate an extension and reach another
-///    extension's storage.
+///    time. Page JavaScript cannot read the token, so it cannot impersonate an
+///    extension or reach another extension's storage.
 /// 2. Everything returns a callback *and* a promise, and failures surface as a
 ///    rejected promise rather than a thrown string.
+/// 3. The shim fills the gaps a custom URL scheme creates — `crypto.randomUUID`,
+///    `crypto.subtle.digest`, `navigator.clipboard` — so a React/Vue extension page
+///    boots instead of dying on its first fingerprinting call.
 enum ExtensionShim {
-    static func source(token: String, extensionID: String, context: String) -> String {
+    static func source(token: String, extensionID: String, context: String, manifestJSON: String = "{}") -> String {
         let template = #"""
         (function () {
           "use strict";
@@ -19,11 +22,25 @@ enum ExtensionShim {
           var EXT_ID = "__CHROMEX_EXT_ID__";
           var CONTEXT = "__CHROMEX_CONTEXT__";
           var UI_LANGUAGE = "__CHROMEX_UI_LANGUAGE__";
+          var MANIFEST = {};
+          try { MANIFEST = JSON.parse(__CHROMEX_MANIFEST__ || "{}"); } catch (error) {}
           var BASE = "chromex-extension://" + EXT_ID + "/";
           var pending = {};
           var nextID = 1;
           var runtimeListeners = [];
           var storageListeners = [];
+          var actionListeners = [];
+          var alarmListeners = [];
+          var installedListeners = [];
+          var startupListeners = [];
+          var tabUpdatedListeners = [];
+          var tabRemovedListeners = [];
+          var navigationListeners = [];
+          var messageListeners = {};
+
+          function report(message) {
+            try { post("log", { level: "error", message: String(message) }); } catch (error) {}
+          }
 
           function post(api, payload, callback) {
             var id = nextID++;
@@ -33,6 +50,7 @@ enum ExtensionShim {
                 token: TOKEN,
                 id: id,
                 api: api,
+                ctx: CONTEXT,
                 payload: payload || {}
               });
             } catch (error) {
@@ -40,6 +58,21 @@ enum ExtensionShim {
             }
             return id;
           }
+
+          function nativePost(payload, callback) {
+            try {
+              webkit.messageHandlers.chromexNative.postMessage(payload);
+            } catch (error) {
+              if (callback) { callback(null); }
+            }
+          }
+
+          window.__chromexNativeReply = function (id, value) {
+            var callback = pending["native-" + id];
+            if (!callback) { return; }
+            delete pending["native-" + id];
+            callback(value);
+          };
 
           window.__chromexReply = function (id, json, errorMessage) {
             var callback = pending[id];
@@ -76,6 +109,143 @@ enum ExtensionShim {
             return promise;
           }
 
+          // ---------------------------------------------------------------
+          // Secure-context gaps on a custom scheme.
+          // ---------------------------------------------------------------
+
+          try {
+            Object.defineProperty(window, "isSecureContext", {
+              get: function () { return true; },
+              configurable: true
+            });
+          } catch (error) {}
+
+          if (typeof crypto !== "undefined") {
+            if (!crypto.randomUUID) {
+              crypto.randomUUID = function () {
+                var bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                var hex = [];
+                for (var i = 0; i < 16; i++) {
+                  hex.push((bytes[i] + 0x100).toString(16).substr(1));
+                }
+                return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" +
+                  hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10).join("");
+              };
+            }
+            if (!crypto.subtle) {
+              crypto.subtle = shimSubtle();
+            }
+          }
+
+          function shimSubtle() {
+            var K = [
+              0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+              0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+              0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+              0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+              0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+              0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+              0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+              0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+            ];
+            var H0 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+
+            function rotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+            function digest(bytes) {
+              var length = bytes.length;
+              var bitLength = length * 8;
+              var withPadding = new Uint8Array((((length + 8) >> 6) + 1) * 64);
+              withPadding.set(bytes);
+              withPadding[length] = 0x80;
+              var view = new DataView(withPadding.buffer);
+              view.setUint32(withPadding.length - 4, bitLength >>> 0, false);
+              view.setUint32(withPadding.length - 8, Math.floor(bitLength / 0x100000000), false);
+
+              var H = H0.slice();
+              var W = new Array(64);
+              for (var offset = 0; offset < withPadding.length; offset += 64) {
+                for (var i = 0; i < 16; i++) {
+                  W[i] = view.getUint32(offset + i * 4, false);
+                }
+                for (i = 16; i < 64; i++) {
+                  var s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+                  var s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
+                  W[i] = (W[i - 16] + s0 + W[i - 7] + s1) >>> 0;
+                }
+                var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+                for (i = 0; i < 64; i++) {
+                  var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+                  var ch = (e & f) ^ ((~e) & g);
+                  var temp1 = (h + S1 + ch + K[i] + W[i]) >>> 0;
+                  var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+                  var maj = (a & b) ^ (a & c) ^ (b & c);
+                  var temp2 = (S0 + maj) >>> 0;
+                  h = g; g = f; f = e; e = (d + temp1) >>> 0;
+                  d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+                }
+                H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0;
+                H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+                H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0;
+                H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+              }
+              var out = new Uint8Array(32);
+              var outView = new DataView(out.buffer);
+              for (i = 0; i < 8; i++) { outView.setUint32(i * 4, H[i], false); }
+              return out;
+            }
+
+            function toBytes(data) {
+              if (data instanceof ArrayBuffer) { return new Uint8Array(data); }
+              if (data && data.buffer instanceof ArrayBuffer) {
+                return new Uint8Array(data.buffer, data.byteOffset || 0, data.byteLength);
+              }
+              if (typeof data === "string") { return new TextEncoder().encode(data); }
+              return new Uint8Array(0);
+            }
+
+            return {
+              digest: function (algorithm, data) {
+                var name = typeof algorithm === "string" ? algorithm : (algorithm && algorithm.name);
+                return new Promise(function (resolve, reject) {
+                  if (String(name).toUpperCase() !== "SHA-256") {
+                    reject(new Error("chromex: only SHA-256 is implemented"));
+                    return;
+                  }
+                  var result = digest(toBytes(data));
+                  resolve(result.buffer);
+                });
+              }
+            };
+          }
+
+          var clipboard = {
+            writeText: function (text) {
+              return new Promise(function (resolve) {
+                var id = nextID++;
+                pending["native-" + id] = function () { resolve(); };
+                nativePost({ kind: "clipboardWrite", text: String(text), id: id });
+              });
+            },
+            readText: function () {
+              return new Promise(function (resolve) {
+                var id = nextID++;
+                pending["native-" + id] = function (value) { resolve(value); };
+                nativePost({ kind: "clipboardRead", id: id });
+              });
+            }
+          };
+          try {
+            Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+          } catch (error) {}
+
+          // ---------------------------------------------------------------
+          // chrome.*
+          // ---------------------------------------------------------------
+
           var chrome = window.chrome || {};
           window.chrome = chrome;
 
@@ -85,17 +255,59 @@ enum ExtensionShim {
           chrome.runtime.getURL = function (path) {
             return BASE + String(path || "").replace(/^\/+/, "");
           };
-          chrome.runtime.sendMessage = function (message, callback) {
+          chrome.runtime.getManifest = function () {
+            return MANIFEST;
+          };
+          chrome.runtime.getPlatformInfo = function (callback) {
+            return withCallback(request("runtime.getPlatformInfo", {}), callback);
+          };
+          chrome.runtime.setUninstallURL = function () {};
+          chrome.runtime.reload = function () {};
+          chrome.runtime.getBackgroundPage = function (callback) {
+            if (callback) { callback(window); }
+          };
+          chrome.runtime.sendMessage = function (a, b, c, d) {
+            var message, callback;
+            if (typeof a === "string") {
+              message = b;
+              callback = typeof c === "function" ? c : (typeof d === "function" ? d : null);
+            } else {
+              message = a;
+              callback = typeof b === "function" ? b : (typeof c === "function" ? c : null);
+            }
             return withCallback(request("runtime.sendMessage", { message: message }), callback);
           };
-          chrome.runtime.onMessage = {
-            addListener: function (listener) {
-              if (typeof listener === "function") { runtimeListeners.push(listener); }
-            },
-            removeListener: function (listener) {
-              runtimeListeners = runtimeListeners.filter(function (item) { return item !== listener; });
-            },
-            hasListener: function (listener) { return runtimeListeners.indexOf(listener) >= 0; }
+          chrome.runtime.onMessage = makeEvent(runtimeListeners);
+          chrome.runtime.onMessageExternal = makeEvent([]);
+          chrome.runtime.onConnect = makeEvent([]);
+          chrome.runtime.onInstalled = makeEvent(installedListeners);
+          chrome.runtime.onStartup = makeEvent(startupListeners);
+          chrome.runtime.onSuspend = makeEvent([]);
+
+          function makeEvent(list) {
+            return {
+              addListener: function (listener) {
+                if (typeof listener === "function" && list.indexOf(listener) < 0) { list.push(listener); }
+              },
+              removeListener: function (listener) {
+                var index = list.indexOf(listener);
+                if (index >= 0) { list.splice(index, 1); }
+              },
+              hasListener: function (listener) { return list.indexOf(listener) >= 0; },
+              dispatch: function () {
+                var args = arguments;
+                list.slice().forEach(function (listener) {
+                  try { listener.apply(null, args); } catch (error) { report(error); }
+                });
+              }
+            };
+          }
+
+          window.__chromexRuntimeEvent = function (name, detailJson) {
+            var detail = {};
+            try { detail = JSON.parse(detailJson || "{}"); } catch (error) {}
+            if (name === "installed") { chrome.runtime.onInstalled.dispatch(detail); }
+            if (name === "startup") { chrome.runtime.onStartup.dispatch(); }
           };
 
           chrome.storage = chrome.storage || {};
@@ -103,6 +315,9 @@ enum ExtensionShim {
             return {
               get: function (keys, callback) {
                 return withCallback(request("storage.get", { area: area, keys: keys }), callback);
+              },
+              getBytesInUse: function (keys, callback) {
+                return withCallback(request("storage.bytes", { area: area }), callback);
               },
               set: function (items, callback) {
                 return withCallback(request("storage.set", { area: area, items: items }), callback);
@@ -112,20 +327,14 @@ enum ExtensionShim {
               },
               clear: function (callback) {
                 return withCallback(request("storage.clear", { area: area }), callback);
-              },
-              getBytesInUse: function (keys, callback) {
-                return withCallback(request("storage.bytes", { area: area }), callback);
               }
             };
           }
           chrome.storage.local = makeArea("local");
           chrome.storage.sync = makeArea("local");
           chrome.storage.session = makeArea("local");
-          chrome.storage.onChanged = {
-            addListener: function (listener) {
-              if (typeof listener === "function") { storageListeners.push(listener); }
-            }
-          };
+          chrome.storage.managed = { get: function (keys, callback) { withCallback(Promise.resolve({}), callback); } };
+          chrome.storage.onChanged = makeEvent(storageListeners);
 
           chrome.tabs = chrome.tabs || {};
           chrome.tabs.query = function (query, callback) {
@@ -133,6 +342,79 @@ enum ExtensionShim {
           };
           chrome.tabs.create = function (options, callback) {
             return withCallback(request("tabs.create", { options: options || {} }), callback);
+          };
+          chrome.tabs.update = function (tabID, options, callback) {
+            return withCallback(request("tabs.update", {
+              tabId: tabID || 0,
+              url: options && options.url,
+              active: options && options.active
+            }), callback);
+          };
+          chrome.tabs.reload = function (tabID, callback) {
+            return withCallback(request("tabs.reload", { tabId: tabID || 0 }), callback);
+          };
+          chrome.tabs.remove = function (tabID, callback) {
+            return withCallback(request("tabs.remove", { tabId: tabID || 0 }), callback);
+          };
+          chrome.tabs.sendMessage = function (tabID, message, callback) {
+            var id = nextID++;
+            if (typeof callback === "function") { pending[id] = callback; }
+            post("tabs.sendMessage", { tabId: tabID, message: message });
+            return id;
+          };
+          chrome.tabs.get = function (tabID, callback) {
+            return withCallback(request("tabs.query", { query: {} }).then(function (tabs) {
+              for (var i = 0; i < tabs.length; i++) {
+                if (tabs[i].id === tabID) { return tabs[i]; }
+              }
+              return undefined;
+            }), callback);
+          };
+          chrome.tabs.onUpdated = makeEvent(tabUpdatedListeners);
+          chrome.tabs.onRemoved = makeEvent(tabRemovedListeners);
+          chrome.tabs.onActivated = makeEvent([]);
+          chrome.tabs.onCreated = makeEvent([]);
+
+          window.__chromexTabUpdated = function (json) {
+            var detail = {};
+            try { detail = JSON.parse(json); } catch (error) {}
+            chrome.tabs.onUpdated.dispatch(detail.tabId || 0, { url: detail.url, status: "complete" }, detail);
+          };
+          window.__chromexNavigation = function (json) {
+            var detail = {};
+            try { detail = JSON.parse(json); } catch (error) {}
+            chrome.webNavigation.onCommitted.dispatch({
+              tabId: detail.tabId || 0,
+              url: detail.url || "",
+              frameId: 0,
+              timeStamp: Date.now()
+            });
+            chrome.webNavigation.onCompleted.dispatch({
+              tabId: detail.tabId || 0,
+              url: detail.url || "",
+              frameId: 0,
+              timeStamp: Date.now()
+            });
+          };
+
+          chrome.scripting = chrome.scripting || {};
+          chrome.scripting.executeScript = function (injection, callback) {
+            var target = (injection && injection.target) || {};
+            return withCallback(request("scripting.executeScript", {
+              target: target,
+              files: injection && injection.files,
+              func: injection && injection.func ? String(injection.func) : undefined,
+              code: injection && injection.args && injection.args.length ? undefined : undefined,
+              worldId: injection && injection.worldId
+            }), callback);
+          };
+          chrome.scripting.insertCSS = function (injection, callback) {
+            var target = (injection && injection.target) || {};
+            return withCallback(request("scripting.insertCSS", {
+              tabId: target.tabId,
+              css: injection && injection.css,
+              files: injection && injection.files
+            }), callback);
           };
 
           chrome.i18n = chrome.i18n || {};
@@ -162,46 +444,201 @@ enum ExtensionShim {
             return withCallback(request("permissions.request", { permissions: permissions || {} }), callback);
           };
 
-          var actionListeners = [];
           chrome.action = chrome.action || {};
-          chrome.action.setBadgeText = function () { /* no badge surface in this build */ };
-          chrome.action.onClicked = {
-            addListener: function (listener) {
-              if (typeof listener === "function") { actionListeners.push(listener); }
-            },
-            removeListener: function (listener) {
-              actionListeners = actionListeners.filter(function (item) { return item !== listener; });
-            }
+          chrome.action.setBadgeText = function (details, callback) {
+            if (callback) { callback(); }
           };
+          chrome.action.setBadgeBackgroundColor = function (details, callback) { if (callback) { callback(); } };
+          chrome.action.setTitle = function (details, callback) { if (callback) { callback(); } };
+          chrome.action.setIcon = function (details, callback) { if (callback) { callback(); } };
+          chrome.action.getBadgeText = function (details, callback) { withCallback(Promise.resolve(""), callback); };
+          chrome.action.onClicked = makeEvent(actionListeners);
           window.__chromexActionClicked = function () {
-            actionListeners.forEach(function (listener) {
-              try { listener({ id: EXT_ID }); } catch (error) {}
+            chrome.action.onClicked.dispatch({ id: EXT_ID });
+          };
+
+          chrome.alarms = chrome.alarms || {};
+          chrome.alarms.create = function (name, info) {
+            if (typeof name === "object") { info = name; name = ""; }
+            post("alarms.create", {
+              name: name || "",
+              delayInMinutes: info && info.when ? 0 : (info && info.delayInMinutes),
+              periodInMinutes: info && info.periodInMinutes
             });
           };
+          chrome.alarms.clear = function (name, callback) {
+            return withCallback(request("alarms.clear", { name: name || "" }), callback);
+          };
+          chrome.alarms.clearAll = function (callback) {
+            return withCallback(request("alarms.clearAll", {}), callback);
+          };
+          chrome.alarms.get = function (name, callback) {
+            return withCallback(request("alarms.getAll", {}).then(function (all) {
+              for (var i = 0; i < all.length; i++) {
+                if (all[i].name === name) { return all[i]; }
+              }
+              return undefined;
+            }), callback);
+          };
+          chrome.alarms.getAll = function (callback) {
+            return withCallback(request("alarms.getAll", {}), callback);
+          };
+          chrome.alarms.onAlarm = makeEvent(alarmListeners);
+          window.__chromexAlarm = function (json) {
+            var detail = {};
+            try { detail = JSON.parse(json); } catch (error) {}
+            chrome.alarms.onAlarm.dispatch({ name: detail.name || "" });
+          };
+
+          chrome.downloads = chrome.downloads || {};
+          chrome.downloads.download = function (options, callback) {
+            var url = typeof options === "string" ? options : (options && options.url);
+            return withCallback(request("downloads.download", { url: url }), callback);
+          };
+          chrome.downloads.search = function (query, callback) { withCallback(Promise.resolve([]), callback); };
+          chrome.downloads.cancel = function (id, callback) { if (callback) { callback(); } };
+          chrome.downloads.onChanged = makeEvent([]);
+
+          chrome.webNavigation = chrome.webNavigation || {};
+          chrome.webNavigation.onCommitted = makeEvent(navigationListeners);
+          chrome.webNavigation.onCompleted = makeEvent([]);
+          chrome.webNavigation.onBeforeNavigate = makeEvent([]);
+          chrome.webNavigation.onDOMContentLoaded = makeEvent([]);
+          chrome.webNavigation.onHistoryStateUpdated = makeEvent([]);
+
+          chrome.webRequest = chrome.webRequest || {};
+          chrome.webRequest.onBeforeRequest = makeEvent([]);
+          chrome.webRequest.onBeforeSendHeaders = makeEvent([]);
+          chrome.webRequest.onSendHeaders = makeEvent([]);
+          chrome.webRequest.onHeadersReceived = makeEvent([]);
+          chrome.webRequest.onResponseStarted = makeEvent([]);
+          chrome.webRequest.onCompleted = makeEvent([]);
+          chrome.webRequest.onErrorOccurred = makeEvent([]);
+          chrome.webRequest.handlerBehaviorChanged = function (callback) { if (callback) { callback(); } };
+
+          chrome.declarativeNetRequest = chrome.declarativeNetRequest || {};
+          chrome.declarativeNetRequest.getDynamicRules = function (callback) {
+            withCallback(Promise.resolve([]), callback);
+          };
+          chrome.declarativeNetRequest.getSessionRules = function (callback) {
+            withCallback(Promise.resolve([]), callback);
+          };
+          chrome.declarativeNetRequest.updateDynamicRules = function (rules, callback) {
+            if (callback) { callback(); }
+          };
+          chrome.declarativeNetRequest.updateSessionRules = function (rules, callback) {
+            if (callback) { callback(); }
+          };
+          chrome.declarativeNetRequest.isRegexSupported = function (query, callback) {
+            withCallback(Promise.resolve({ isSupported: false }), callback);
+          };
+
+          chrome.offscreen = chrome.offscreen || {};
+          chrome.offscreen.createDocument = function (options, callback) {
+            withCallback(Promise.resolve(), callback);
+          };
+          chrome.offscreen.closeDocument = function (callback) {
+            withCallback(Promise.resolve(), callback);
+          };
+
+          chrome.proxy = chrome.proxy || {};
+          chrome.proxy.settings = chrome.proxy.settings || {};
+          chrome.proxy.settings.set = function (details, callback) { if (callback) { callback(); } };
+          chrome.proxy.settings.get = function (details, callback) { withCallback(Promise.resolve({}), callback); };
+          chrome.proxy.settings.clear = function (details, callback) { if (callback) { callback(); } };
+
+          chrome.system = chrome.system || {};
+          chrome.system.cpu = chrome.system.cpu || {};
+          chrome.system.cpu.getInfo = function (callback) {
+            return withCallback(request("system.cpu", {}), callback);
+          };
+          chrome.system.memory = chrome.system.memory || {};
+          chrome.system.memory.getInfo = function (callback) {
+            return withCallback(request("system.memory", {}), callback);
+          };
+
+          chrome.contextMenus = chrome.contextMenus || {};
+          chrome.contextMenus.create = function (details, callback) { if (callback) { callback(); } };
+          chrome.contextMenus.removeAll = function (callback) { if (callback) { callback(); } };
+          chrome.contextMenus.onClicked = makeEvent([]);
+
+          chrome.notifications = chrome.notifications || {};
+          chrome.notifications.create = function (id, options, callback) {
+            var identifier = "chromex-" + Date.now();
+            if (typeof id === "function") { id(identifier); }
+            else if (typeof callback === "function") { callback(identifier); }
+            return identifier;
+          };
+          chrome.notifications.clear = function (id, callback) { if (callback) { callback(true); } };
+          chrome.notifications.onClicked = makeEvent([]);
+
+          chrome.commands = chrome.commands || {};
+          chrome.commands.getAll = function (callback) { withCallback(Promise.resolve([]), callback); };
+          chrome.commands.onCommand = makeEvent([]);
+
+          chrome.omnibox = chrome.omnibox || {};
+          chrome.omnibox.setDefaultSuggestion = function () {};
+          chrome.omnibox.onInputChanged = makeEvent([]);
+          chrome.omnibox.onInputEntered = makeEvent([]);
+
+          chrome.cookies = chrome.cookies || {};
+          chrome.cookies.get = function (details, callback) { withCallback(Promise.resolve(null), callback); };
+          chrome.cookies.getAll = function (details, callback) { withCallback(Promise.resolve([]), callback); };
+          chrome.cookies.set = function (details, callback) { withCallback(Promise.resolve(null), callback); };
+          chrome.cookies.remove = function (details, callback) { withCallback(Promise.resolve(null), callback); };
+
+          chrome.history = chrome.history || {};
+          chrome.history.search = function (query, callback) { withCallback(Promise.resolve([]), callback); };
+          chrome.bookmarks = chrome.bookmarks || {};
+          chrome.bookmarks.search = function (query, callback) { withCallback(Promise.resolve([]), callback); };
+          chrome.bookmarks.getTree = function (callback) { withCallback(Promise.resolve([]), callback); };
+
+          chrome.identity = chrome.identity || {};
+          chrome.identity.getAuthToken = function (details, callback) {
+            if (typeof callback === "function") {
+              chrome.runtime.lastError = { message: "identity is not available on iOS" };
+              callback(undefined);
+            }
+            return Promise.reject(new Error("identity is not available on iOS"));
+          };
+
+          chrome.tabGroups = chrome.tabGroups || {};
+          chrome.tabGroups.query = function (query, callback) { withCallback(Promise.resolve([]), callback); };
+
+          // ---------------------------------------------------------------
+          // Message routing
+          // ---------------------------------------------------------------
 
           window.__chromexStorageChanged = function (changesJson) {
             var changes;
             try { changes = JSON.parse(changesJson); } catch (error) { return; }
-            storageListeners.forEach(function (listener) {
-              try { listener(changes, "local"); } catch (error) {}
-            });
+            chrome.storage.onChanged.dispatch(changes, "local");
           };
 
           window.__chromexDispatch = function (requestID, payloadJson) {
             var message;
             try { message = JSON.parse(payloadJson); } catch (error) { return "__none__"; }
             if (!runtimeListeners.length) { return "__none__"; }
-            var sender = { id: EXT_ID, url: location.href };
+            var sender = {
+              id: EXT_ID,
+              url: location.href,
+              tab: { id: 0, url: location.href },
+              frameId: 0
+            };
             var responded = false;
             function sendResponse(value) {
               if (responded) { return; }
               responded = true;
               post("runtime.response", { requestId: requestID, value: value });
             }
-            runtimeListeners.forEach(function (listener) {
+            runtimeListeners.slice().forEach(function (listener) {
               try {
                 var result = listener(message, sender, sendResponse);
-                if (result !== undefined && result !== true && result !== null) {
+                if (result && typeof result.then === "function") {
+                  result.then(sendResponse, function (error) {
+                    sendResponse({ __error: String(error) });
+                  });
+                } else if (result !== undefined && result !== true && result !== null) {
                   sendResponse(result);
                 }
               } catch (error) {
@@ -211,10 +648,22 @@ enum ExtensionShim {
             return "__handled__";
           };
 
-          if (CONTEXT === "background") {
+          if (CONTEXT !== "content") {
+            window.addEventListener("error", function (event) {
+              report((event.message || "script error") + " @ " + (event.filename || "") + ":" + (event.lineno || 0));
+            }, true);
             window.addEventListener("unhandledrejection", function (event) {
-              post("log", { level: "error", message: String(event.reason) });
+              report("unhandled rejection: " + String(event.reason));
             });
+            var originalError = console.error;
+            console.error = function () {
+              try {
+                var parts = [];
+                for (var i = 0; i < arguments.length; i++) { parts.push(String(arguments[i])); }
+                report(parts.join(" "));
+              } catch (error) {}
+              if (originalError) { originalError.apply(console, arguments); }
+            };
           }
         })();
         """#
@@ -227,6 +676,7 @@ enum ExtensionShim {
             .replacingOccurrences(of: "__CHROMEX_EXT_ID__", with: extensionID)
             .replacingOccurrences(of: "__CHROMEX_CONTEXT__", with: context)
             .replacingOccurrences(of: "__CHROMEX_UI_LANGUAGE__", with: uiLanguage)
+            .replacingOccurrences(of: "__CHROMEX_MANIFEST__", with: JSBridge.literal(manifestJSON))
     }
 
     /// Wraps a background script in a minimal HTML document so WebKit can host it.

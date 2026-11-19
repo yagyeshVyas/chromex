@@ -100,8 +100,8 @@ final class ExtensionFixtureTests: XCTestCase {
         let staged = try ExtensionPackage.stage(from: try fixture("unsupported-api"))
         defer { try? FileManager.default.removeItem(at: staged.directory) }
         XCTAssertEqual(staged.report.verdict, .runsWithLimits)
-        XCTAssertTrue(staged.report.unsupported.contains("alarms"))
         XCTAssertTrue(staged.report.unsupported.contains("cookies"))
+        XCTAssertTrue(staged.report.unsupported.contains("identity"))
     }
 
     func testBroaderAccessIsFlagged() throws {
