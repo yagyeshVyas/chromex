@@ -982,27 +982,64 @@ enum ExtensionShim {
           chrome.windows.onFocusChanged = makeEvent([]);
           chrome.windows.onCreated = makeEvent([]);
 
-          chrome.runtime.connect = function (extensionId, connectInfo) {
-            report("chrome.runtime.connect: " + String((connectInfo && connectInfo.name) || ""));
-            var listeners = [];
+          var nativePorts = {};
+          var nextPortID = 0;
+
+          function makeNativePort(portId, name) {
+            var messageListeners = [];
             var disconnectListeners = [];
             var port = {
-              name: (connectInfo && connectInfo.name) || "",
+              name: name || "",
               sender: { id: EXT_ID, url: location.href },
-              onMessage: makeEvent(listeners),
+              onMessage: makeEvent(messageListeners),
               onDisconnect: makeEvent(disconnectListeners),
               postMessage: function (message) {
-                post("runtime.connect.postMessage", { message: message });
+                post("runtime.port.postMessage", { portId: portId, message: message });
               },
               disconnect: function () {
+                post("runtime.port.disconnect", { portId: portId });
+                delete nativePorts[portId];
                 disconnectListeners.slice().forEach(function (listener) {
-                  try { listener(); } catch (error) {}
+                  try { listener(port); } catch (error) {}
                 });
               }
             };
+            nativePorts[portId] = port;
+            return port;
+          }
+
+          chrome.runtime.connect = function (extensionId, connectInfo) {
+            if (connectInfo === undefined && extensionId && typeof extensionId === "object") {
+              connectInfo = extensionId;
+              extensionId = EXT_ID;
+            }
+            var portId = EXT_ID + ":" + (++nextPortID) + ":" + Math.random().toString(36).slice(2);
+            var port = makeNativePort(portId, (connectInfo && connectInfo.name) || "");
+            post("runtime.connect", { portId: portId, name: port.name });
             return port;
           };
           chrome.runtime.onConnect = makeEvent([]);
+
+          window.__chromexIncomingPort = function (portId, name, senderJson) {
+            var port = makeNativePort(portId, name);
+            try { port.sender = JSON.parse(senderJson || "{}"); } catch (error) {}
+            chrome.runtime.onConnect.dispatch(port);
+          };
+
+          window.__chromexPortMessage = function (portId, payloadJson) {
+            var port = nativePorts[portId];
+            if (!port) { return; }
+            var message;
+            try { message = JSON.parse(payloadJson); } catch (error) { return; }
+            port.onMessage.dispatch(message, port);
+          };
+
+          window.__chromexPortDisconnect = function (portId) {
+            var port = nativePorts[portId];
+            if (!port) { return; }
+            delete nativePorts[portId];
+            port.onDisconnect.dispatch(port);
+          };
 
           var noopApis = {
             management: { getAll: [], getSelf: {}, launchApp: undefined },

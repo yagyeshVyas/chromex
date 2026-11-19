@@ -183,9 +183,17 @@ final class ExtensionManager: ObservableObject {
     private var pendingReplies: [Int: PendingReply] = [:]
     private var nextRequestID = 1
     private var alarms: [String: [String: AlarmSpec]] = [:]
+    private var ports: [String: PortEndpoint] = [:]
     private var alarmTasks: [String: [String: Task<Void, Never>]] = [:]
     private var downloadIDs: [Int: UUID] = [:]
     private var nextDownloadID = 1
+
+    private struct PortEndpoint {
+        var webView: WKWebView?
+        var frame: WKFrameInfo?
+        var context: String
+        var extensionID: String
+    }
 
     private struct PendingReply {
         var webView: WKWebView?
@@ -681,6 +689,53 @@ final class ExtensionManager: ObservableObject {
                 }
             }
 
+        case "runtime.connect":
+            let portId = payload["portId"] as? String ?? ""
+            guard !portId.isEmpty else { return }
+            ports[portId] = PortEndpoint(
+                webView: webView,
+                frame: frame,
+                context: context,
+                extensionID: identifier
+            )
+            if let runtime = runtimes[identifier] {
+                let senderJSON = JSBridge.stringify([
+                    "id": identifier,
+                    "url": webView?.url?.absoluteString ?? ""
+                ])
+                runtime.evaluate(
+                    "window.__chromexIncomingPort(" +
+                    "\(JSBridge.literal(portId)), " +
+                    "\(JSBridge.literal(payload["name"] as? String ?? "")), " +
+                    "\(JSBridge.literal(senderJSON)));"
+                )
+            }
+
+        case "runtime.port.postMessage":
+            guard let portId = payload["portId"] as? String,
+                  let endpoint = ports[portId] else { return }
+            let messageJSON = JSBridge.stringify(payload["message"])
+            if webView == nil {
+                deliverPortMessage(portId: portId, messageJSON: messageJSON, to: endpoint)
+            } else if let runtime = runtimes[endpoint.extensionID] {
+                runtime.evaluate(
+                    "window.__chromexPortMessage && window.__chromexPortMessage(" +
+                    "\(JSBridge.literal(portId)), \(JSBridge.literal(messageJSON)));"
+                )
+            }
+
+        case "runtime.port.disconnect":
+            guard let portId = payload["portId"] as? String,
+                  let endpoint = ports.removeValue(forKey: portId) else { return }
+            if webView == nil {
+                deliverPortDisconnect(portId: portId, to: endpoint)
+            } else if let runtime = runtimes[endpoint.extensionID] {
+                runtime.evaluate(
+                    "window.__chromexPortDisconnect && window.__chromexPortDisconnect(" +
+                    "\(JSBridge.literal(portId)));"
+                )
+            }
+
         case "network.fetch":
             handleNetworkFetch(payload: payload, record: record, respond: respond)
 
@@ -804,6 +859,28 @@ final class ExtensionManager: ObservableObject {
 
         default:
             respond(nil, "Unsupported API: \(api)")
+        }
+    }
+
+    private func deliverPortMessage(portId: String, messageJSON: String, to endpoint: PortEndpoint) {
+        guard let webView = endpoint.webView else { return }
+        let script = "window.__chromexPortMessage && window.__chromexPortMessage("
+            + "\(JSBridge.literal(portId)), \(JSBridge.literal(messageJSON)));"
+        if endpoint.context == "content" {
+            webView.evaluateJavaScript(script, in: endpoint.frame, in: app?.contentWorld ?? .page, completionHandler: nil)
+        } else {
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
+    }
+
+    private func deliverPortDisconnect(portId: String, to endpoint: PortEndpoint) {
+        guard let webView = endpoint.webView else { return }
+        let script = "window.__chromexPortDisconnect && window.__chromexPortDisconnect("
+            + "\(JSBridge.literal(portId)));"
+        if endpoint.context == "content" {
+            webView.evaluateJavaScript(script, in: endpoint.frame, in: app?.contentWorld ?? .page, completionHandler: nil)
+        } else {
+            webView.evaluateJavaScript(script, completionHandler: nil)
         }
     }
 
