@@ -53,11 +53,11 @@ final class ExtensionSchemeHandler: NSObject, @preconcurrency WKURLSchemeHandler
     private var roots: [String: URL] = [:]
 
     func register(extensionID: String, directory: URL) {
-        roots[extensionID] = directory.standardizedFileURL
+        roots[extensionID.lowercased()] = directory.standardizedFileURL
     }
 
     func unregister(extensionID: String) {
-        roots[extensionID] = nil
+        roots[extensionID.lowercased()] = nil
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
@@ -187,6 +187,27 @@ final class ExtensionBridge: NSObject, @preconcurrency WKScriptMessageHandler {
     ) {
         guard message.name == "chromexBridge", let body = message.body as? [String: Any] else { return }
         manager?.handleBridgeMessage(body, from: message.webView, frame: message.frameInfo)
+    }
+}
+
+// MARK: - Extension page observer
+
+/// Logs extension page loads and failures. Without this a blank popup is
+/// indistinguishable from a 404 served by the scheme handler.
+@MainActor
+final class ExtensionPageObserver: NSObject, @preconcurrency WKNavigationDelegate {
+    static let shared = ExtensionPageObserver()
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        AppLog.write("extension page loaded: \(webView.url?.absoluteString ?? "?")", tag: "ext")
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        AppLog.write("extension page failed: \(webView.url?.absoluteString ?? "?") — \(error.localizedDescription)", tag: "ext")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        AppLog.write("extension page failed early: \(webView.url?.absoluteString ?? "?") — \(error.localizedDescription)", tag: "ext")
     }
 }
 

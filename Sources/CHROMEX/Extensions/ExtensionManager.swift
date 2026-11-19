@@ -377,6 +377,7 @@ final class ExtensionManager: ObservableObject {
 
         schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = ExtensionPageObserver.shared
         let urlString = "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(popup)"
         if let url = URL(string: urlString) {
             webView.load(URLRequest(url: url))
@@ -403,6 +404,7 @@ final class ExtensionManager: ObservableObject {
 
         schemeHandler.register(extensionID: record.id, directory: root.appendingPathComponent(record.id, isDirectory: true))
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = ExtensionPageObserver.shared
         if let url = URL(string: "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(options)") {
             webView.load(URLRequest(url: url))
         }
