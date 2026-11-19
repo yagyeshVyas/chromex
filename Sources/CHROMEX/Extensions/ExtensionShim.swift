@@ -754,14 +754,23 @@ enum ExtensionShim {
           chrome.webNavigation.onDOMContentLoaded = makeEvent([]);
           chrome.webNavigation.onHistoryStateUpdated = makeEvent([]);
 
+          function observedWebRequestEvent(event, name) {
+            var add = event.addListener;
+            event.addListener = function () {
+              report("chrome.webRequest." + name + ".addListener");
+              return add.apply(event, arguments);
+            };
+            return event;
+          }
+
           chrome.webRequest = chrome.webRequest || {};
-          chrome.webRequest.onBeforeRequest = makeEvent([]);
-          chrome.webRequest.onBeforeSendHeaders = makeEvent([]);
+          chrome.webRequest.onBeforeRequest = observedWebRequestEvent(makeEvent([]), "onBeforeRequest");
+          chrome.webRequest.onBeforeSendHeaders = observedWebRequestEvent(makeEvent([]), "onBeforeSendHeaders");
           chrome.webRequest.onSendHeaders = makeEvent([]);
-          chrome.webRequest.onHeadersReceived = makeEvent([]);
+          chrome.webRequest.onHeadersReceived = observedWebRequestEvent(makeEvent([]), "onHeadersReceived");
           chrome.webRequest.onResponseStarted = makeEvent([]);
-          chrome.webRequest.onCompleted = makeEvent([]);
-          chrome.webRequest.onErrorOccurred = makeEvent([]);
+          chrome.webRequest.onCompleted = observedWebRequestEvent(makeEvent([]), "onCompleted");
+          chrome.webRequest.onErrorOccurred = observedWebRequestEvent(makeEvent([]), "onErrorOccurred");
           chrome.webRequest.handlerBehaviorChanged = function (callback) { if (callback) { callback(); } };
 
           chrome.declarativeNetRequest = chrome.declarativeNetRequest || {};
@@ -791,8 +800,13 @@ enum ExtensionShim {
 
           chrome.proxy = chrome.proxy || {};
           chrome.proxy.settings = chrome.proxy.settings || {};
-          chrome.proxy.settings.set = function (details, callback) { if (callback) { callback(); } };
-          chrome.proxy.settings.get = function (details, callback) { withCallback(Promise.resolve({}), callback); };
+          chrome.proxy.settings.set = function (details, callback) {
+            report("chrome.proxy.settings.set: " + String(JSON.stringify(details && details.value || {})));
+            if (callback) { callback(); }
+          };
+          chrome.proxy.settings.get = function (details, callback) {
+            withCallback(Promise.resolve({ value: { mode: "direct" } }), callback);
+          };
           chrome.proxy.settings.clear = function (details, callback) { if (callback) { callback(); } };
 
           chrome.system = chrome.system || {};
@@ -952,6 +966,7 @@ enum ExtensionShim {
             }), callback);
           };
           chrome.windows.create = function (options, callback) {
+            report("chrome.windows.create: " + String(JSON.stringify(options || {})));
             var url = options && options.url;
             if (url) {
               chrome.tabs.create({ url: url, active: true }, function (tab) {
@@ -968,6 +983,7 @@ enum ExtensionShim {
           chrome.windows.onCreated = makeEvent([]);
 
           chrome.runtime.connect = function (extensionId, connectInfo) {
+            report("chrome.runtime.connect: " + String((connectInfo && connectInfo.name) || ""));
             var listeners = [];
             var disconnectListeners = [];
             var port = {
