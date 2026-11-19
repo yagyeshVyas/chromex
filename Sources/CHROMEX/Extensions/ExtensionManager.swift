@@ -185,6 +185,7 @@ final class ExtensionManager: ObservableObject {
     private var alarms: [String: [String: AlarmSpec]] = [:]
     private var ports: [String: PortEndpoint] = [:]
     private var proxySettings: [String: [String: Any]] = [:]
+    private var extensionRuleLists: [String: [WKContentRuleList]] = [:]
     private var alarmTasks: [String: [String: Task<Void, Never>]] = [:]
     private var downloadIDs: [Int: UUID] = [:]
     private var nextDownloadID = 1
@@ -223,6 +224,7 @@ final class ExtensionManager: ObservableObject {
             let directory = root.appendingPathComponent(record.id, isDirectory: true)
             schemeHandler.register(extensionID: record.id, directory: directory)
             ensureBackgroundDocument(for: record, in: directory)
+            compileRules(for: record)
             scheduleRuntime(for: record)
         }
     }
@@ -241,6 +243,12 @@ final class ExtensionManager: ObservableObject {
     private func persist() {
         guard let data = try? JSONEncoder().encode(installed) else { return }
         try? data.write(to: registryURL, options: [.atomic])
+    }
+
+    /// Content rule lists compiled from every enabled extension's
+    /// `declarative_net_request` rule resources.
+    func contentRuleLists() -> [WKContentRuleList] {
+        extensionRuleLists.values.flatMap { $0 }
     }
 
     // MARK: Install / remove / enable
@@ -277,6 +285,7 @@ final class ExtensionManager: ObservableObject {
 
         schemeHandler.register(extensionID: identifier, directory: destination)
         ensureBackgroundDocument(for: record, in: destination)
+        compileRules(for: record)
         warmScriptCache(extensionID: identifier, manifest: staged.manifest, directory: destination)
         installed.append(record)
         persist()
@@ -291,6 +300,7 @@ final class ExtensionManager: ObservableObject {
         storages[record.id] = nil
         scriptCache[record.id] = nil
         cancelAlarms(for: record.id)
+        removeCompiledRules(for: record.id)
         installed.removeAll { $0.id == record.id }
         try? FileManager.default.removeItem(at: root.appendingPathComponent(record.id, isDirectory: true))
         persist()
@@ -301,11 +311,13 @@ final class ExtensionManager: ObservableObject {
         installed[index].isEnabled = enabled
         persist()
         if enabled {
+            compileRules(for: installed[index])
             scheduleRuntime(for: installed[index])
         } else {
             stopRuntime(for: record.id)
             scriptCache[record.id] = nil
             cancelAlarms(for: record.id)
+            removeCompiledRules(for: record.id)
         }
     }
 
@@ -453,6 +465,132 @@ final class ExtensionManager: ObservableObject {
         let declaredOK = permissions.allSatisfy { declared.contains($0) }
         let originsOK = origins.allSatisfy { granted.contains($0) || granted.contains("<all_urls>") }
         return declaredOK && originsOK
+    }
+
+    // MARK: declarativeNetRequest
+
+    /// Chrome's `declarativeNetRequest` is the one blocking API WebKit can honour:
+    /// its rules describe declarative matches, which map onto `WKContentRuleList`.
+    private func compileRules(for record: InstalledExtension) {
+        guard let manifest = record.manifest, !manifest.ruleResources.isEmpty else { return }
+        let directory = root.appendingPathComponent(record.id, isDirectory: true)
+        var compiled: [[String: Any]] = []
+
+        for resource in manifest.ruleResources where resource.enabled {
+            let file = directory.appendingPathComponent(resource.path)
+            guard let data = try? Data(contentsOf: file),
+                  let rules = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+                AppLog.write("rule resource unreadable: \(resource.path)", tag: "ext")
+                continue
+            }
+            var blocks: [[String: Any]] = []
+            var allows: [[String: Any]] = []
+            for rule in rules {
+                guard let translation = Self.blockerRule(from: rule) else { continue }
+                let action = (rule["action"] as? [String: Any])?["type"] as? String ?? ""
+                if action == "allow" {
+                    allows.append(translation)
+                } else {
+                    blocks.append(translation)
+                }
+            }
+            compiled.append(contentsOf: blocks)
+            compiled.append(contentsOf: allows)
+        }
+
+        guard !compiled.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: compiled),
+              let encoded = String(data: data, encoding: .utf8) else { return }
+
+        let identifier = "chromex-ext-\(record.id)"
+        WKContentRuleListStore.default()?.compileContentRuleList(
+            forIdentifier: identifier,
+            encodedContentRuleList: encoded
+        ) { list, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let list {
+                    self.extensionRuleLists[record.id] = [list]
+                    AppLog.write("extension rules compiled: \(record.displayName) (\(compiled.count))", tag: "ext")
+                } else {
+                    AppLog.write("extension rules rejected: \(record.displayName) — \(error?.localizedDescription ?? "unknown")", tag: "ext")
+                }
+            }
+        }
+    }
+
+    private func removeCompiledRules(for identifier: String) {
+        extensionRuleLists[identifier] = nil
+        WKContentRuleListStore.default()?.removeContentRuleList(forIdentifier: "chromex-ext-\(identifier)") { _ in }
+    }
+
+    nonisolated static func blockerRule(from rule: [String: Any]) -> [String: Any]? {
+        let action = rule["action"] as? [String: Any] ?? [:]
+        let type = action["type"] as? String ?? ""
+        guard type == "block" || type == "allow" else { return nil }
+        let condition = rule["condition"] as? [String: Any] ?? [:]
+
+        var trigger: [String: Any] = [:]
+        if let regex = condition["regexFilter"] as? String {
+            trigger["url-filter"] = regex
+        } else if let filter = condition["urlFilter"] as? String {
+            trigger["url-filter"] = wkURLFilter(fromChromeFilter: filter)
+        } else {
+            return nil
+        }
+        if let caseSensitive = condition["isUrlFilterCaseSensitive"] as? Bool, caseSensitive {
+            trigger["url-filter-is-case-sensitive"] = true
+        }
+        if let types = condition["resourceTypes"] as? [String], !types.isEmpty {
+            let mapped = types.compactMap { wkResourceType($0) }
+            if !mapped.isEmpty { trigger["resource-type"] = mapped }
+        }
+
+        if type == "block" {
+            return ["trigger": trigger, "action": ["type": "block"]]
+        }
+        return ["trigger": trigger, "action": ["type": "ignore-previous-rules"]]
+    }
+
+    nonisolated static func wkResourceType(_ chromeType: String) -> String? {
+        switch chromeType {
+        case "main_frame", "sub_frame": return "document"
+        case "stylesheet": return "style-sheet"
+        case "script": return "script"
+        case "image": return "image"
+        case "font": return "font"
+        case "media": return "media"
+        case "xmlhttprequest", "other", "websocket": return "raw"
+        default: return nil
+        }
+    }
+
+    /// Translates Chrome's filter syntax (`||host^`, `*`, `|anchor`) into the
+    /// ICU regular expression a WebKit content blocker expects.
+    nonisolated static func wkURLFilter(fromChromeFilter filter: String) -> String {
+        var pattern = filter
+        var prefix = ".*"
+        if pattern.hasPrefix("||") {
+            pattern.removeFirst(2)
+            prefix = "^[a-z]+://([^/]+\\.)?"
+        } else if pattern.hasPrefix("|") {
+            pattern.removeFirst()
+            prefix = "^"
+        }
+
+        var body = ""
+        for character in pattern {
+            if character == "*" {
+                body += ".*"
+            } else if character == "^" {
+                body += "(?:[^a-zA-Z0-9_\\-.%]|$)"
+            } else if ".^$+?()[]{}|\\".contains(character) {
+                body += "\\" + String(character)
+            } else {
+                body.append(character)
+            }
+        }
+        return prefix + body
     }
 
     // MARK: Caps

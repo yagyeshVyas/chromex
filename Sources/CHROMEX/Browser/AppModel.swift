@@ -184,6 +184,9 @@ final class AppModel: ObservableObject {
         if preferences.blockAdsAndTrackers {
             adBlocker.attach(to: configuration)
         }
+        for list in extensions.contentRuleLists() {
+            configuration.userContentController.add(list)
+        }
         configuration.userContentController.add(extensions.bridge, name: "chromexBridge")
         configuration.userContentController.add(nativeBridge, name: "chromexNative")
         return configuration

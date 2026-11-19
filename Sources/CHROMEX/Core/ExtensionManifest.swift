@@ -25,6 +25,12 @@ struct ContentScript: Sendable, Hashable {
     var world: ContentWorldKind = .isolated
 }
 
+struct RuleResource: Sendable, Hashable {
+    var id: String
+    var path: String
+    var enabled: Bool = true
+}
+
 struct ExtensionAction: Sendable, Hashable {
     var defaultPopup: String?
     var defaultTitle: String?
@@ -54,6 +60,7 @@ struct ExtensionManifest: Sendable {
     var backgroundKind: BackgroundKind
     var icons: [String: String]
     var contentSecurityPolicy: String?
+    var ruleResources: [RuleResource] = []
     /// `default_locale` from the manifest; selects the folder under `_locales`.
     var defaultLocale: String? = nil
 }
@@ -155,6 +162,19 @@ enum ManifestParser {
             }
         }
 
+        var ruleResources: [RuleResource] = []
+        if let dnr = root["declarative_net_request"] as? [String: Any],
+           let resources = dnr["rule_resources"] as? [[String: Any]] {
+            ruleResources = resources.compactMap { entry in
+                guard let path = entry["path"] as? String else { return nil }
+                return RuleResource(
+                    id: entry["id"] as? String ?? path,
+                    path: path,
+                    enabled: (entry["enabled"] as? Bool) ?? true
+                )
+            }
+        }
+
         let optionsPage = (root["options_page"] as? String)
             ?? ((root["options_ui"] as? [String: Any])?["page"] as? String)
 
@@ -174,6 +194,7 @@ enum ManifestParser {
             backgroundKind: backgroundKind,
             icons: (root["icons"] as? [String: String]) ?? [:],
             contentSecurityPolicy: contentSecurityPolicy(from: root["content_security_policy"]),
+            ruleResources: ruleResources,
             defaultLocale: root["default_locale"] as? String
         )
     }
