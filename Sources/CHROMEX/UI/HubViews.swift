@@ -20,6 +20,8 @@ struct HubView: View {
     @State private var pending: PendingImport?
     @State private var errorMessage: String?
     @State private var isImporting = false
+    @State private var showingStorePrompt = false
+    @State private var storeInput = ""
 
     private var allowedTypes: [UTType] {
         var types: [UTType] = [.zip, .folder]
@@ -98,6 +100,18 @@ struct HubView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .alert("Install from Chrome Web Store", isPresented: $showingStorePrompt) {
+            TextField("Store link or 32-character id", text: $storeInput)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Cancel", role: .cancel) { storeInput = "" }
+            Button("Install") {
+                beginStoreImport(storeInput)
+                storeInput = ""
+            }
+        } message: {
+            Text("Paste a chromewebstore.google.com link or the extension id.")
+        }
     }
 
     private var emptyState: some View {
@@ -122,8 +136,18 @@ struct HubView: View {
                     .foregroundStyle(ChromeStyle.textTertiary)
             }
             Spacer()
-            Button {
-                showingImporter = true
+            Menu {
+                Button {
+                    showingImporter = true
+                } label: {
+                    Label("From Files", systemImage: "folder")
+                }
+                Button {
+                    storeInput = ""
+                    showingStorePrompt = true
+                } label: {
+                    Label("From Chrome Web Store", systemImage: "globe")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .bold))
@@ -131,7 +155,7 @@ struct HubView: View {
                     .frame(width: 32, height: 32)
                     .background(ChromeStyle.accent, in: Circle())
             }
-            .accessibilityLabel("Import extension")
+            .accessibilityLabel("Add extension")
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
@@ -192,6 +216,27 @@ struct HubView: View {
             beginImport(url)
         case .failure(let error):
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func beginStoreImport(_ input: String) {
+        guard let identifier = ChromeWebStore.identifier(from: input) else {
+            errorMessage = ChromeWebStore.StoreError.invalidIdentifier.localizedDescription
+            return
+        }
+        isImporting = true
+        Task {
+            do {
+                let file = try await ChromeWebStore.download(extensionID: identifier)
+                let staged = try await Task.detached(priority: .userInitiated) {
+                    try ExtensionPackage.stage(from: file)
+                }.value
+                let grants = InstalledExtension.requestedGrants(for: staged.manifest)
+                pending = PendingImport(package: staged, grants: grants)
+            } catch {
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+            isImporting = false
         }
     }
 
