@@ -31,7 +31,7 @@ struct HubView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             VStack(spacing: 0) {
                 hubHeader
                 ScrollView {
@@ -55,7 +55,7 @@ struct HubView: View {
                         }
                         Text("CHROMEX runs a documented subset of Chrome extension APIs. Every package is analysed before install; the detail screen lists what will not work.")
                             .font(ChromexFont.caption)
-                            .foregroundStyle(ChromexColor.textTertiary)
+                            .foregroundStyle(ChromeStyle.textTertiary)
                             .padding(.top, 4)
                     }
                     .padding(20)
@@ -65,7 +65,7 @@ struct HubView: View {
                 importingOverlay
             }
         }
-        .presentationBackground(ChromexColor.background)
+        .presentationBackground(ChromeStyle.page)
         .navigationTitle("Chromex Hub")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -116,10 +116,10 @@ struct HubView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Chromex Hub")
                     .font(ChromexFont.title)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                 Text("\(model.extensions.installed.count) installed · \(model.extensions.installed.filter(\.isEnabled).count) active")
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
             Spacer()
             Button {
@@ -129,14 +129,14 @@ struct HubView: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 32, height: 32)
-                    .background(ChromexColor.electricBlue, in: Circle())
+                    .background(ChromeStyle.accent, in: Circle())
             }
             .accessibilityLabel("Import extension")
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
         .padding(.bottom, 10)
-        .background(ChromexColor.surface.opacity(0.6))
+        .background(ChromeStyle.toolbar.opacity(0.6))
     }
 
     @ViewBuilder
@@ -147,19 +147,19 @@ struct HubView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "stethoscope")
-                        .foregroundStyle(ChromexColor.warning)
+                        .foregroundStyle(ChromeStyle.textSecondary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Runtime diagnostics")
                             .font(ChromexFont.headline)
-                            .foregroundStyle(ChromexColor.textPrimary)
+                            .foregroundStyle(ChromeStyle.text)
                         Text("\(model.extensions.diagnostics.count) message(s) from background pages")
                             .font(ChromexFont.caption)
-                            .foregroundStyle(ChromexColor.textTertiary)
+                            .foregroundStyle(ChromeStyle.textTertiary)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ChromexColor.textTertiary)
+                        .foregroundStyle(ChromeStyle.textTertiary)
                 }
                 .cardStyle()
             }
@@ -172,10 +172,10 @@ struct HubView: View {
             ProgressView()
             Text("Inspecting package…")
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
         }
         .padding(24)
-        .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(ChromeStyle.toolbar, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var alertBinding: Binding<Bool> {
@@ -220,7 +220,7 @@ struct ExtensionHubCard: View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(ChromexColor.surfaceRaised)
+                    .fill(ChromeStyle.toolbarRaised)
                 DiamondMark(size: 20)
             }
             .frame(width: 46, height: 46)
@@ -228,11 +228,11 @@ struct ExtensionHubCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(record.displayName)
                     .font(ChromexFont.headline)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
@@ -240,14 +240,14 @@ struct ExtensionHubCard: View {
                 StateDot(kind: record.isEnabled ? .active : .idle)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
         }
         .padding(14)
-        .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(ChromeStyle.toolbar, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(ChromexColor.hairline, lineWidth: 0.5)
+                .strokeBorder(ChromeStyle.separator, lineWidth: 0.5)
         )
     }
 
@@ -270,16 +270,16 @@ struct ExtensionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(record.displayName)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
             Circle()
-                .fill(record.isEnabled ? ChromexColor.success : ChromexColor.textTertiary)
+                .fill(record.isEnabled ? ChromeStyle.accent : ChromeStyle.textTertiary)
                 .frame(width: 7, height: 7)
         }
         .padding(.vertical, 4)
@@ -324,7 +324,7 @@ struct ExtensionDetailView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     identity
@@ -377,7 +377,7 @@ struct ExtensionDetailView: View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(ChromexColor.surfaceRaised)
+                    .fill(ChromeStyle.toolbarRaised)
                 DiamondMark(size: 26)
             }
             .frame(width: 58, height: 58)
@@ -385,13 +385,13 @@ struct ExtensionDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(current.displayName)
                     .font(ChromexFont.title)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                 Text("v\(current.version) · Manifest V\(current.manifest?.manifestVersion ?? 3)")
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
                 Text(signatureLine)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(current.signatureVerified ? ChromexColor.success : ChromexColor.textTertiary)
+                    .foregroundStyle(current.signatureVerified ? ChromeStyle.accent : ChromeStyle.textTertiary)
             }
             Spacer()
         }
@@ -410,15 +410,15 @@ struct ExtensionDetailView: View {
                 Spacer()
                 Toggle("", isOn: enabledBinding)
                     .labelsHidden()
-                    .tint(ChromexColor.electricBlue)
+                    .tint(ChromeStyle.accent)
             }
             Text(current.report.verdict.explanation)
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
             if !current.report.supported.isEmpty {
                 Text("Works: \(current.report.supported.joined(separator: ", "))")
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
         }
         .cardStyle()
@@ -445,15 +445,15 @@ struct ExtensionDetailView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: finding.status == .refused ? "hand.raised.fill" : "minus.circle")
                 .font(.system(size: 12))
-                .foregroundStyle(finding.status == .refused ? ChromexColor.danger : ChromexColor.warning)
+                .foregroundStyle(finding.status == .refused ? ChromeStyle.danger : ChromeStyle.textSecondary)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(finding.api)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                 Text(finding.message)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             }
         }
     }
@@ -464,7 +464,7 @@ struct ExtensionDetailView: View {
             if current.grants.isEmpty {
                 Text("No host access was granted.")
                     .font(ChromexFont.footnote)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             } else {
                 ForEach(current.grants, id: \.self) { grant in
                     grantRow(grant)
@@ -478,10 +478,10 @@ struct ExtensionDetailView: View {
         HStack(spacing: 8) {
             Image(systemName: grant == "<all_urls>" ? "exclamationmark.shield.fill" : "checkmark.shield")
                 .font(.system(size: 12))
-                .foregroundStyle(grant == "<all_urls>" ? ChromexColor.warning : ChromexColor.textSecondary)
+                .foregroundStyle(grant == "<all_urls>" ? ChromeStyle.textSecondary : ChromeStyle.textSecondary)
             Text(grant)
                 .font(ChromexFont.mono)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
             Spacer()
         }
     }
@@ -514,11 +514,11 @@ struct ExtensionDetailView: View {
         HStack {
             Text(label)
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
             Spacer()
             Text(value)
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textPrimary)
+                .foregroundStyle(ChromeStyle.text)
         }
     }
 
@@ -559,10 +559,10 @@ struct ExtensionDetailView: View {
         } label: {
             Text("Remove extension")
                 .font(ChromexFont.headline)
-                .foregroundStyle(ChromexColor.danger)
+                .foregroundStyle(ChromeStyle.danger)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
-                .background(ChromexColor.danger.opacity(0.1), in: Capsule())
+                .background(ChromeStyle.danger.opacity(0.1), in: Capsule())
         }
     }
 }
@@ -584,7 +584,7 @@ struct ImportReviewView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     headerBlock
@@ -617,10 +617,10 @@ struct ImportReviewView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(manifest.name)
                     .font(ChromexFont.title)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                 Text(headerSubtitle)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
             Spacer()
         }
@@ -635,7 +635,7 @@ struct ImportReviewView: View {
             VerdictBadge(verdict: report.verdict)
             Text(report.verdict.explanation)
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
         }
         .cardStyle()
     }
@@ -657,11 +657,11 @@ struct ImportReviewView: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "minus.circle")
                 .font(.system(size: 11))
-                .foregroundStyle(ChromexColor.warning)
+                .foregroundStyle(ChromeStyle.textSecondary)
                 .padding(.top, 2)
             Text("\(finding.api) — \(finding.message)")
                 .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
         }
     }
 
@@ -671,7 +671,7 @@ struct ImportReviewView: View {
             if pending.grants.isEmpty {
                 Text("This extension requests no host access.")
                     .font(ChromexFont.footnote)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             } else {
                 ForEach(pending.grants, id: \.self) { grant in
                     grantToggle(grant)
@@ -686,13 +686,13 @@ struct ImportReviewView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(grant == "<all_urls>" ? "All websites" : grant)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                 Text(grant == "<all_urls>" ? "Read and change data on every site you visit" : "Read and change data on matching sites")
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
         }
-        .tint(ChromexColor.electricBlue)
+        .tint(ChromeStyle.accent)
     }
 
     private func binding(for grant: String) -> Binding<Bool> {
@@ -712,7 +712,7 @@ struct ImportReviewView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Nothing has run yet. Installing adds the package to this device; content scripts only run on sites you allowed.")
                 .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
             Button {
                 install()
             } label: {
@@ -733,7 +733,7 @@ struct ImportReviewView: View {
     }
 
     private var installTint: Color {
-        report.verdict == .refused ? ChromexColor.textTertiary : ChromexColor.electricBlue
+        report.verdict == .refused ? ChromeStyle.textTertiary : ChromeStyle.accent
     }
 
     private var alertBinding: Binding<Bool> {
@@ -767,7 +767,7 @@ struct ExtensionPopupView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             VStack(spacing: 0) {
                 popupHeader
                 if let webView {
@@ -794,13 +794,13 @@ struct ExtensionPopupView: View {
             DiamondMark(size: 16)
             Text(record.displayName)
                 .font(ChromexFont.headline)
-                .foregroundStyle(ChromexColor.textPrimary)
+                .foregroundStyle(ChromeStyle.text)
             Spacer()
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
             .accessibilityLabel("Close popup")
         }
@@ -819,19 +819,19 @@ struct ExtensionOptionsView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             VStack(spacing: 0) {
                 HStack {
                     DiamondMark(size: 16)
                     Text("\(record.displayName) options")
                         .font(ChromexFont.headline)
-                        .foregroundStyle(ChromexColor.textPrimary)
+                        .foregroundStyle(ChromeStyle.text)
                     Spacer()
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(ChromexColor.textTertiary)
+                            .foregroundStyle(ChromeStyle.textTertiary)
                     }
                     .accessibilityLabel("Close options")
                 }
@@ -864,7 +864,7 @@ struct DiagnosticsView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             if model.extensions.diagnostics.isEmpty {
                 EmptyStateView(
                     symbol: "checkmark.circle",
@@ -890,7 +890,7 @@ struct DiagnosticsView: View {
                 ForEach(Array(model.extensions.diagnostics.enumerated()), id: \.offset) { _, line in
                     Text(line)
                         .font(ChromexFont.mono)
-                        .foregroundStyle(ChromexColor.textSecondary)
+                        .foregroundStyle(ChromeStyle.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

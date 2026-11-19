@@ -495,11 +495,10 @@ final class AppModel: ObservableObject {
         }
         let selected = min(max(0, index), tabs.count - 1)
         selectedTabID = tabs[selected].id
-        // Chrome restores every tab, not just the focused one. WebKit keeps a
-        // page suspended until it is shown, so loading them all is cheap.
-        for tab in tabs {
-            tab.ensureLoaded()
-        }
+        // Load the focused tab immediately and the rest when they are selected:
+        // restoring a dozen WebKit processes at launch is what makes session
+        // restore feel slow.
+        tabs[selected].ensureLoaded()
     }
 
     // MARK: Browsing data

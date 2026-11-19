@@ -102,26 +102,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Run unit tests
-        run: |
-          set -o pipefail
-          DESTINATION_NAME="$(xcrun simctl list devices available \
-            | grep -E '^[[:space:]]+iPhone' \
-            | head -1 \
-            | sed -E 's/^[[:space:]]+//; s/ \(.*$//')"
-          if [ -z "$DESTINATION_NAME" ]; then
-            DESTINATION_NAME="iPhone 16"
-          fi
-          echo "Testing on: $DESTINATION_NAME"
-          xcodebuild test \
-            -project CHROMEX.xcodeproj \
-            -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=$DESTINATION_NAME" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            2>&1 | tee tests.log
-
       - name: Package unsigned IPA
         run: |
           APP="build/Build/Products/Release-iphoneos/CHROMEX.app"
@@ -166,6 +146,26 @@ jobs:
           path: CHROMEX-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          DESTINATION_NAME="$(xcrun simctl list devices available \
+            | grep -E '^[[:space:]]+iPhone' \
+            | head -1 \
+            | sed -E 's/^[[:space:]]+//; s/ \(.*$//')"
+          if [ -z "$DESTINATION_NAME" ]; then
+            DESTINATION_NAME="iPhone 16"
+          fi
+          echo "Testing on: $DESTINATION_NAME"
+          xcodebuild test \
+            -project CHROMEX.xcodeproj \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=$DESTINATION_NAME" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee tests.log
 
       - name: Upload build log on failure
         if: failure()

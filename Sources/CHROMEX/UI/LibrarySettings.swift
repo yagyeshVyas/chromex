@@ -8,7 +8,7 @@ struct BookmarksView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             if model.bookmarks.isEmpty {
                 EmptyStateView(
                     symbol: "bookmark",
@@ -50,15 +50,15 @@ struct BookmarksView: View {
         HStack(spacing: 12) {
             Image(systemName: "bookmark.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(ChromexColor.electricBlue)
+                .foregroundStyle(ChromeStyle.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(bookmark.title)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(1)
                 Text(bookmark.urlString)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
@@ -89,7 +89,7 @@ struct HistoryView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             if model.history.isEmpty {
                 EmptyStateView(
                     symbol: "clock.arrow.circlepath",
@@ -136,16 +136,16 @@ struct HistoryView: View {
         HStack(spacing: 12) {
             Text(entry.visitedAt, format: .dateTime.hour().minute())
                 .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
                 .frame(width: 52, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(1)
                 Text(entry.host)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
@@ -168,7 +168,7 @@ struct DownloadsView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             if model.downloads.isEmpty {
                 EmptyStateView(
                     symbol: "arrow.down.circle",
@@ -209,21 +209,21 @@ struct DownloadsView: View {
         HStack(spacing: 12) {
             Image(systemName: icon(for: item))
                 .font(.system(size: 16))
-                .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textSecondary)
+                .foregroundStyle(item.state == .failed ? ChromeStyle.danger : ChromeStyle.textSecondary)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.filename)
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(1)
                 if item.state == .inProgress {
                     ProgressView(value: min(max(item.progress, 0), 1))
-                        .tint(ChromexColor.electricBlue)
+                        .tint(ChromeStyle.accent)
                         .frame(maxWidth: 180)
                 }
                 Text(subtitle(for: item))
                     .font(ChromexFont.caption)
-                    .foregroundStyle(item.state == .failed ? ChromexColor.danger : ChromexColor.textTertiary)
+                    .foregroundStyle(item.state == .failed ? ChromeStyle.danger : ChromeStyle.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
@@ -232,7 +232,7 @@ struct DownloadsView: View {
                     shareItem = ShareItem(url: URL(fileURLWithPath: path))
                 } label: {
                     Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(ChromexColor.electricBlue)
+                        .foregroundStyle(ChromeStyle.accent)
                 }
                 .buttonStyle(.plain)
             }
@@ -271,7 +271,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             Form {
                 browsingSection
                 displaySection
@@ -328,9 +328,9 @@ struct SettingsView: View {
                 }
             }
             Toggle("Desktop site by default", isOn: desktopBinding)
-                .tint(ChromexColor.electricBlue)
+                .tint(ChromeStyle.accent)
             Toggle("Show bookmarks bar", isOn: bookmarksBarBinding)
-                .tint(ChromexColor.electricBlue)
+                .tint(ChromeStyle.accent)
         } header: {
             Text("Display")
         } footer: {
@@ -341,7 +341,7 @@ struct SettingsView: View {
     private var privacySection: some View {
         Section {
             Toggle("Block ads and trackers", isOn: blockingBinding)
-                .tint(ChromexColor.electricBlue)
+                .tint(ChromeStyle.accent)
             NavigationLink("Privacy dashboard") { PrivacyDashboardView() }
         } header: {
             Text("Privacy")
@@ -358,7 +358,7 @@ struct SettingsView: View {
                     Spacer()
                     Text(engine.template)
                         .font(ChromexFont.caption)
-                        .foregroundStyle(ChromexColor.textTertiary)
+                        .foregroundStyle(ChromeStyle.textTertiary)
                         .lineLimit(1)
                 }
                 .swipeActions {
@@ -410,7 +410,7 @@ struct SettingsView: View {
         HStack {
             Text(label)
             Spacer()
-            Text(value).foregroundStyle(ChromexColor.textTertiary)
+            Text(value).foregroundStyle(ChromeStyle.textTertiary)
         }
     }
 
@@ -473,7 +473,7 @@ struct PrivacyDashboardView: View {
 
     var body: some View {
         ZStack {
-            BrowserBackground()
+            ChromeStyle.page
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     protectionCard
@@ -493,27 +493,27 @@ struct PrivacyDashboardView: View {
             HStack(spacing: 10) {
                 Image(systemName: model.preferences.blockAdsAndTrackers ? "shield.lefthalf.filled" : "shield.slash")
                     .font(.system(size: 22))
-                    .foregroundStyle(model.preferences.blockAdsAndTrackers ? ChromexColor.electricBlueBright : ChromexColor.textTertiary)
+                    .foregroundStyle(model.preferences.blockAdsAndTrackers ? ChromeStyle.accent : ChromeStyle.textTertiary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.preferences.blockAdsAndTrackers ? "Protection on" : "Protection off")
                         .font(ChromexFont.headline)
-                        .foregroundStyle(ChromexColor.textPrimary)
+                        .foregroundStyle(ChromeStyle.text)
                     Text(ruleSummary)
                         .font(ChromexFont.caption)
-                        .foregroundStyle(ChromexColor.textSecondary)
+                        .foregroundStyle(ChromeStyle.textSecondary)
                 }
                 Spacer()
             }
             if let error = model.adBlocker.lastError {
                 Text(error)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.danger)
+                    .foregroundStyle(ChromeStyle.danger)
             }
             Toggle("Block ads and trackers", isOn: Binding(
                 get: { model.preferences.blockAdsAndTrackers },
                 set: { model.preferences.blockAdsAndTrackers = $0 }
             ))
-            .tint(ChromexColor.electricBlue)
+            .tint(ChromeStyle.accent)
         }
         .cardStyle()
     }
@@ -530,7 +530,7 @@ struct PrivacyDashboardView: View {
             if model.permissions.isEmpty {
                 Text("No site has been granted or denied a permission yet.")
                     .font(ChromexFont.footnote)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             } else {
                 ForEach(sortedPermissions) { permission in
                     permissionRow(permission)
@@ -548,15 +548,15 @@ struct PrivacyDashboardView: View {
         HStack(spacing: 8) {
             Text(permission.host)
                 .font(ChromexFont.callout)
-                .foregroundStyle(ChromexColor.textPrimary)
+                .foregroundStyle(ChromeStyle.text)
                 .lineLimit(1)
             Text(permission.type.displayName)
                 .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
             Spacer()
             Text(permission.decision == .allow ? "Allowed" : "Denied")
                 .font(ChromexFont.caption)
-                .foregroundStyle(permission.decision == .allow ? ChromexColor.success : ChromexColor.danger)
+                .foregroundStyle(permission.decision == .allow ? ChromeStyle.accent : ChromeStyle.danger)
         }
     }
 
@@ -566,7 +566,7 @@ struct PrivacyDashboardView: View {
             if model.extensions.installed.isEmpty {
                 Text("No extensions installed.")
                     .font(ChromexFont.footnote)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             } else {
                 ForEach(model.extensions.installed) { record in
                     extensionRow(record)
@@ -581,12 +581,12 @@ struct PrivacyDashboardView: View {
             DiamondMark(size: 12)
             Text(record.displayName)
                 .font(ChromexFont.callout)
-                .foregroundStyle(ChromexColor.textPrimary)
+                .foregroundStyle(ChromeStyle.text)
                 .lineLimit(1)
             Spacer()
             Text(accessSummary(record))
                 .font(ChromexFont.caption)
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
         }
     }
 
@@ -601,7 +601,7 @@ struct PrivacyDashboardView: View {
             SectionHeader(title: "What this page cannot tell you")
             Text("WebKit gives a browser no per-request hook, so CHROMEX cannot count individual blocked requests. This dashboard reports what it can verify — compiled rules, permission decisions, and which extensions hold host access — instead of inventing numbers.")
                 .font(ChromexFont.footnote)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
         }
         .cardStyle()
     }

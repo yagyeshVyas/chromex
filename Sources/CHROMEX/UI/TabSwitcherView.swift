@@ -11,13 +11,13 @@ struct TabSwitcherView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                BrowserBackground()
+                ChromeStyle.page
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         if model.groups.isEmpty {
                             Text("Long-press a tab to move it into a group.")
                                 .font(ChromexFont.caption)
-                                .foregroundStyle(ChromexColor.textTertiary)
+                                .foregroundStyle(ChromeStyle.textTertiary)
                         } else {
                             groupsRow
                         }
@@ -69,11 +69,11 @@ struct TabSwitcherView: View {
                         HStack(spacing: 6) {
                             Circle().fill(ChromexColor.violet).frame(width: 7, height: 7)
                             Text(group.name).font(ChromexFont.footnote)
-                            Text("\(groupCount(group))").font(ChromexFont.caption).foregroundStyle(ChromexColor.textTertiary)
+                            Text("\(groupCount(group))").font(ChromexFont.caption).foregroundStyle(ChromeStyle.textTertiary)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(ChromexColor.surface, in: Capsule())
+                        .background(ChromeStyle.toolbar, in: Capsule())
                         .contextMenu {
                             Button("Delete group", role: .destructive) { model.removeGroup(group) }
                         }
@@ -110,7 +110,7 @@ struct TabSwitcherView: View {
                 HStack {
                     Text((tab.urlString.isEmpty ? "New Tab" : (URL(string: tab.urlString)?.host ?? "New Tab")))
                         .font(ChromexFont.caption)
-                        .foregroundStyle(ChromexColor.textSecondary)
+                        .foregroundStyle(ChromeStyle.textSecondary)
                         .lineLimit(1)
                     Spacer()
                     if tab.isPrivate {
@@ -121,7 +121,7 @@ struct TabSwitcherView: View {
                 }
                 Text(tab.snapshotTitle())
                     .font(ChromexFont.callout)
-                    .foregroundStyle(ChromexColor.textPrimary)
+                    .foregroundStyle(ChromeStyle.text)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
@@ -137,9 +137,9 @@ struct TabSwitcherView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(ChromexColor.textTertiary)
+                            .foregroundStyle(ChromeStyle.textTertiary)
                             .frame(width: 26, height: 26)
-                            .background(ChromexColor.surfaceRaised, in: Circle())
+                            .background(ChromeStyle.toolbarRaised, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Close tab")
@@ -149,12 +149,12 @@ struct TabSwitcherView: View {
             .frame(height: 190, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(ChromexColor.surface)
+                    .fill(ChromeStyle.toolbar)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(
-                        tab.id == model.selectedTabID ? ChromexColor.electricBlue.opacity(0.6) : ChromexColor.hairline,
+                        tab.id == model.selectedTabID ? ChromeStyle.accent.opacity(0.6) : ChromeStyle.separator,
                         lineWidth: tab.id == model.selectedTabID ? 1.2 : 0.5
                     )
             )
@@ -168,17 +168,17 @@ struct TabSwitcherView: View {
             VStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(ChromexColor.electricBlue)
+                    .foregroundStyle(ChromeStyle.accent)
                 Text("New Tab")
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textSecondary)
+                    .foregroundStyle(ChromeStyle.textSecondary)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 190)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
-                    .foregroundStyle(ChromexColor.hairline)
+                    .foregroundStyle(ChromeStyle.separator)
             )
         }
         .buttonStyle(.plain)

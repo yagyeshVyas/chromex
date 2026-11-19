@@ -23,11 +23,13 @@ struct RootView: View {
 enum ChromeSheet: Identifiable {
     case menu
     case hub
+    case extensionPopup(InstalledExtension)
 
     var id: String {
         switch self {
         case .menu: return "menu"
         case .hub: return "hub"
+        case .extensionPopup(let record): return "popup-\(record.id)"
         }
     }
 }
@@ -61,7 +63,15 @@ struct BrowserView: View {
                         onNewTab: { model.openTab(url: nil, select: true) }
                     )
 
-                    toolbar(for: tab)
+                    ChromeToolbarRow(
+                        tab: tab,
+                        omniboxText: $omniboxText,
+                        omniboxFocused: $omniboxFocused,
+                        onSubmit: submitFromOmnibox,
+                        onOpenHub: { sheet = .hub },
+                        onOpenMenu: { sheet = .menu },
+                        onPopup: { record in sheet = .extensionPopup(record) }
+                    )
 
                     if bookmarksVisible {
                         BookmarksBar(onOpen: { url in tab.load(url) })
@@ -77,7 +87,11 @@ struct BrowserView: View {
                         )
                     }
 
-                    pageArea(for: tab)
+                    ChromePageArea(
+                        tab: tab,
+                        onFocusOmnibox: { omniboxFocused = true },
+                        onOpenHub: { sheet = .hub }
+                    )
                 } else {
                     EmptyStateView(
                         symbol: "globe",
@@ -106,6 +120,7 @@ struct BrowserView: View {
         .sheet(item: $sheet) { active in
             sheetContent(active)
         }
+
         .onAppear {
             omniboxText = model.currentTab.map { displayText(for: $0.urlString) } ?? ""
         }
@@ -122,79 +137,6 @@ struct BrowserView: View {
             omniboxText = displayText(for: current.urlString)
         }
 
-    }
-
-    // MARK: Toolbar
-
-    @ViewBuilder
-    private func toolbar(for tab: BrowserTab) -> some View {
-        HStack(spacing: 2) {
-            ChromeIconButton(symbol: "chevron.left", enabled: tab.canGoBack) { tab.goBack() }
-            ChromeIconButton(symbol: "chevron.right", enabled: tab.canGoForward) { tab.goForward() }
-            ChromeIconButton(symbol: tab.isLoading ? "xmark" : "arrow.clockwise") {
-                tab.isLoading ? tab.stopLoading() : tab.reload()
-            }
-
-            OmniboxField(
-                text: $omniboxText,
-                fullURL: tab.urlString,
-                placeholder: "Search \(model.currentSearchEngine.name) or type a URL",
-                isSecure: tab.isSecure,
-                isPrivate: tab.isPrivate,
-                isFocused: $omniboxFocused,
-                onSubmit: submitFromOmnibox
-            )
-
-            ChromeIconButton(
-                symbol: model.isBookmarked(urlString: tab.urlString) ? "star.fill" : "star",
-                enabled: !tab.urlString.isEmpty,
-                tint: model.isBookmarked(urlString: tab.urlString) ? ChromeStyle.accent : ChromeStyle.text
-            ) {
-                model.toggleBookmark(title: tab.snapshotTitle(), urlString: tab.urlString)
-            }
-
-            ChromeIconButton(symbol: "puzzlepiece.extension") { sheet = .hub }
-            ChromeIconButton(symbol: "ellipsis") { sheet = .menu }
-        }
-        .padding(.horizontal, 6)
-        .frame(height: ChromeStyle.toolbarHeight)
-        .background(ChromeStyle.toolbar)
-        .overlay(alignment: .bottom) { ChromeDivider() }
-    }
-
-    // MARK: Page
-
-    @ViewBuilder
-    private func pageArea(for tab: BrowserTab) -> some View {
-        ZStack(alignment: .top) {
-            WebViewContainer(webView: tab.webView)
-                .background(ChromeStyle.page)
-
-            if tab.urlString.isEmpty, tab.pageError == nil {
-                HomeView(
-                    onFocusOmnibox: {
-                        omniboxFocused = true
-                    },
-                    onOpenURL: { url in tab.load(url) },
-                    onOpenHub: { sheet = .hub }
-                )
-            }
-
-            if let error = tab.pageError {
-                ErrorPageView(error: error, onReload: { tab.reload() })
-            }
-
-            if tab.isLoading, tab.estimatedProgress < 1 {
-                GeometryReader { proxy in
-                    Rectangle()
-                        .fill(ChromeStyle.accent)
-                        .frame(width: proxy.size.width * max(0.02, tab.estimatedProgress), height: 2)
-                }
-                .frame(height: 2)
-                .transaction { $0.animation = .easeOut(duration: 0.15) }
-            }
-        }
-        .clipped()
     }
 
     // MARK: Sheet content
@@ -239,6 +181,8 @@ struct BrowserView: View {
             }
         case .hub:
             NavigationStack { HubView() }
+        case .extensionPopup(let record):
+            ExtensionPopupView(record: record)
         }
     }
 
@@ -254,6 +198,7 @@ struct BrowserView: View {
     private func displayText(for urlString: String) -> String {
         URLResolver.displayString(for: URL(string: urlString))
     }
+
 
     // MARK: Find
 
@@ -291,8 +236,13 @@ struct ChromeTabStrip: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 2) {
                         ForEach(tabs) { tab in
-                            tabChip(tab)
-                                .id(tab.id)
+                            ChromeTabChip(
+                                tab: tab,
+                                isSelected: tab.id == selectedID,
+                                onSelect: { onSelect(tab) },
+                                onClose: { onClose(tab) }
+                            )
+                            .id(tab.id)
                         }
                     }
                     .padding(.horizontal, 4)
@@ -323,44 +273,6 @@ struct ChromeTabStrip: View {
         .background(ChromeStyle.tabStrip)
     }
 
-    private func tabChip(_ tab: BrowserTab) -> some View {
-        let isSelected = tab.id == selectedID
-        return HStack(spacing: 6) {
-            if tab.isPrivate {
-                Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(ChromeStyle.incognito)
-            } else if tab.isLoading {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-            Text(tab.snapshotTitle())
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? ChromeStyle.text : ChromeStyle.tabTextInactive)
-                .lineLimit(1)
-            if isSelected {
-                Button {
-                    onClose(tab)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(ChromeStyle.textSecondary)
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close tab")
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(width: 158, height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? ChromeStyle.tabActive : ChromeStyle.tabInactive)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect(tab) }
-    }
 }
 
 // MARK: - Omnibox
@@ -1026,5 +938,167 @@ struct DiamondShape: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
         path.closeSubpath()
         return path
+    }
+}
+
+
+// MARK: - Toolbar row
+
+/// Owns the page-bound chrome. It observes `BrowserTab` directly so the address
+/// bar, progress and navigation buttons update live while a page loads.
+struct ChromeToolbarRow: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var tab: BrowserTab
+    @Binding var omniboxText: String
+    @Binding var omniboxFocused: Bool
+    var onSubmit: () -> Void
+    var onOpenHub: () -> Void
+    var onOpenMenu: () -> Void
+    var onPopup: (InstalledExtension) -> Void
+
+    private var pinned: [InstalledExtension] {
+        Array(model.extensions.installed.filter { record in
+            record.isEnabled && record.manifest?.action != nil
+        }.prefix(3))
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ChromeIconButton(symbol: "chevron.left", enabled: tab.canGoBack) { tab.goBack() }
+            ChromeIconButton(symbol: "chevron.right", enabled: tab.canGoForward) { tab.goForward() }
+            ChromeIconButton(symbol: tab.isLoading ? "xmark" : "arrow.clockwise") {
+                tab.isLoading ? tab.stopLoading() : tab.reload()
+            }
+
+            OmniboxField(
+                text: $omniboxText,
+                fullURL: tab.urlString,
+                placeholder: "Search \(model.currentSearchEngine.name) or type a URL",
+                isSecure: tab.isSecure,
+                isPrivate: tab.isPrivate,
+                isFocused: $omniboxFocused,
+                onSubmit: onSubmit
+            )
+
+            ChromeIconButton(
+                symbol: model.isBookmarked(urlString: tab.urlString) ? "star.fill" : "star",
+                enabled: !tab.urlString.isEmpty,
+                tint: model.isBookmarked(urlString: tab.urlString) ? ChromeStyle.accent : ChromeStyle.text
+            ) {
+                model.toggleBookmark(title: tab.snapshotTitle(), urlString: tab.urlString)
+            }
+
+            ForEach(pinned) { record in
+                Button {
+                    if record.manifest?.action?.defaultPopup != nil {
+                        onPopup(record)
+                    } else {
+                        model.extensions.dispatchActionClick(for: record)
+                    }
+                } label: {
+                    Image(systemName: record.manifest?.action?.defaultPopup != nil
+                          ? "puzzlepiece.extension.fill"
+                          : "bolt.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(ChromexColor.violet)
+                        .frame(width: 30, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(record.displayName)
+            }
+
+            ChromeIconButton(symbol: "puzzlepiece.extension") { onOpenHub() }
+            ChromeIconButton(symbol: "ellipsis") { onOpenMenu() }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: ChromeStyle.toolbarHeight)
+        .background(ChromeStyle.toolbar)
+        .overlay(alignment: .bottom) { ChromeDivider() }
+    }
+}
+
+// MARK: - Page area
+
+struct ChromePageArea: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var tab: BrowserTab
+    var onFocusOmnibox: () -> Void
+    var onOpenHub: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            WebViewContainer(webView: tab.webView)
+                .background(ChromeStyle.page)
+
+            if tab.urlString.isEmpty, tab.pageError == nil {
+                HomeView(
+                    onFocusOmnibox: onFocusOmnibox,
+                    onOpenURL: { url in tab.load(url) },
+                    onOpenHub: onOpenHub
+                )
+            }
+
+            if let error = tab.pageError {
+                ErrorPageView(error: error, onReload: { tab.reload() })
+            }
+
+            if tab.isLoading, tab.estimatedProgress < 1 {
+                GeometryReader { proxy in
+                    Rectangle()
+                        .fill(ChromeStyle.accent)
+                        .frame(width: proxy.size.width * max(0.02, tab.estimatedProgress), height: 2)
+                }
+                .frame(height: 2)
+            }
+        }
+        .clipped()
+    }
+}
+
+// MARK: - Tab chip
+
+struct ChromeTabChip: View {
+    @ObservedObject var tab: BrowserTab
+    let isSelected: Bool
+    var onSelect: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if tab.isPrivate {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(ChromeStyle.incognito)
+            } else if tab.isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+            }
+            Text(tab.snapshotTitle())
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? ChromeStyle.text : ChromeStyle.tabTextInactive)
+                .lineLimit(1)
+            if isSelected {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(ChromeStyle.textSecondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close tab")
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(width: 158, height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? ChromeStyle.tabActive : ChromeStyle.tabInactive)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
     }
 }

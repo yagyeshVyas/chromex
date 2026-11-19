@@ -33,7 +33,7 @@ enum ChromexColor {
         })
     }
 
-    static let background = dynamic(dark: 0x05070B, light: 0xF5F6FA)
+    static let background = dynamic(dark: 0x202124, light: 0xFFFFFF)
     static let surface = dynamic(dark: 0x10141D, light: 0xFFFFFF)
     static let surfaceRaised = dynamic(dark: 0x151A24, light: 0xEDEFF6)
     static let surfaceSunken = dynamic(dark: 0x0A0D14, light: 0xE6E9F1)
@@ -86,10 +86,10 @@ struct SurfaceCard<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(ChromeStyle.toolbar, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(ChromexColor.hairline, lineWidth: 0.5)
+                    .strokeBorder(ChromeStyle.separator, lineWidth: 0.5)
             )
     }
 }
@@ -103,12 +103,12 @@ struct SectionHeader: View {
             Text(title.uppercased())
                 .font(ChromexFont.caption)
                 .tracking(0.8)
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
             Spacer()
             if let trailing {
                 Text(trailing)
                     .font(ChromexFont.caption)
-                    .foregroundStyle(ChromexColor.textTertiary)
+                    .foregroundStyle(ChromeStyle.textTertiary)
             }
         }
     }
@@ -120,10 +120,10 @@ struct StateDot: View {
 
     var color: Color {
         switch kind {
-        case .active: return ChromexColor.success
-        case .idle: return ChromexColor.textTertiary
-        case .fault: return ChromexColor.warning
-        case .blocked: return ChromexColor.danger
+        case .active: return ChromeStyle.accent
+        case .idle: return ChromeStyle.textTertiary
+        case .fault: return ChromeStyle.textSecondary
+        case .blocked: return ChromeStyle.danger
         }
     }
 
@@ -145,14 +145,14 @@ struct EmptyStateView: View {
         VStack(spacing: 12) {
             Image(systemName: symbol)
                 .font(.system(size: 30, weight: .light))
-                .foregroundStyle(ChromexColor.textTertiary)
+                .foregroundStyle(ChromeStyle.textTertiary)
             Text(title)
                 .font(ChromexFont.headline)
-                .foregroundStyle(ChromexColor.textPrimary)
+                .foregroundStyle(ChromeStyle.text)
             Text(message)
                 .font(ChromexFont.footnote)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(ChromexColor.textSecondary)
+                .foregroundStyle(ChromeStyle.textSecondary)
                 .frame(maxWidth: 280)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
@@ -167,7 +167,7 @@ struct EmptyStateView: View {
 // MARK: - Buttons
 
 struct PrimaryButtonStyle: ButtonStyle {
-    var fill: Color = ChromexColor.electricBlue
+    var fill: Color = ChromeStyle.accent
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -183,11 +183,11 @@ struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(ChromexFont.callout)
-            .foregroundStyle(ChromexColor.textPrimary)
+            .foregroundStyle(ChromeStyle.text)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(
-                ChromexColor.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1),
+                ChromeStyle.toolbarRaised.opacity(configuration.isPressed ? 0.7 : 1),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
     }
@@ -200,10 +200,10 @@ struct VerdictBadge: View {
 
     private var tint: Color {
         switch verdict {
-        case .runs: return ChromexColor.success
-        case .runsWithLimits: return ChromexColor.warning
-        case .unsupported: return ChromexColor.textSecondary
-        case .refused: return ChromexColor.danger
+        case .runs: return ChromeStyle.accent
+        case .runsWithLimits: return ChromeStyle.textSecondary
+        case .unsupported: return ChromeStyle.textSecondary
+        case .refused: return ChromeStyle.danger
         }
     }
 
@@ -232,16 +232,9 @@ struct VerdictBadge: View {
 // MARK: - Background
 
 struct BrowserBackground: View {
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
-        ZStack {
-            ChromexColor.background
-            if scheme == .dark {
-                ChromexColor.homeGlow.opacity(0.55)
-            }
-        }
-        .ignoresSafeArea()
+        ChromeStyle.page
+            .ignoresSafeArea()
     }
 }
 
@@ -251,10 +244,10 @@ extension View {
     func cardStyle() -> some View {
         self
             .padding(16)
-            .background(ChromexColor.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(ChromeStyle.toolbar, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(ChromexColor.hairline, lineWidth: 0.5)
+                    .strokeBorder(ChromeStyle.separator, lineWidth: 0.5)
             )
     }
 
