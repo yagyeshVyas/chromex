@@ -186,6 +186,7 @@ final class ExtensionManager: ObservableObject {
     private var ports: [String: PortEndpoint] = [:]
     private var proxySettings: [String: [String: Any]] = [:]
     private var extensionRuleLists: [String: [WKContentRuleList]] = [:]
+    private var offscreens: [String: ExtensionOffscreenRuntime] = [:]
     private var alarmTasks: [String: [String: Task<Void, Never>]] = [:]
     private var downloadIDs: [Int: UUID] = [:]
     private var nextDownloadID = 1
@@ -202,6 +203,7 @@ final class ExtensionManager: ObservableObject {
         var frame: WKFrameInfo?
         var context: String
         var envelopeID: Int
+        var runtimeID: String? = nil
     }
 
     init(root: URL) {
@@ -364,7 +366,7 @@ final class ExtensionManager: ObservableObject {
         }
         runtime.onUnhandled = { [weak self] requestID in
             guard let self, let pending = self.pendingReplies.removeValue(forKey: requestID) else { return }
-            self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
+            self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context, runtimeID: pending.runtimeID)
         }
     }
 
@@ -465,6 +467,48 @@ final class ExtensionManager: ObservableObject {
         let declaredOK = permissions.allSatisfy { declared.contains($0) }
         let originsOK = origins.allSatisfy { granted.contains($0) || granted.contains("<all_urls>") }
         return declaredOK && originsOK
+    }
+
+    // MARK: Offscreen documents
+
+    private func startOffscreenDocument(
+        payload: [String: Any],
+        record: InstalledExtension,
+        respond: @escaping (Any?, String?) -> Void
+    ) {
+        if offscreens[record.id] != nil {
+            respond([:])
+            return
+        }
+        let requested = payload["url"] as? String
+        let documentPath = (requested?.isEmpty == false ? requested : nil) ?? "offscreen.html"
+        guard let url = URL(string: "\(ExtensionSchemeHandler.scheme)://\(record.id)/\(documentPath)") else {
+            respond(nil, "offscreen.createDocument needs a url")
+            return
+        }
+        let token = registerToken(for: record.id)
+        let shim = ExtensionShim.source(
+            token: token,
+            extensionID: record.id,
+            context: "offscreen",
+            manifestJSON: record.manifestJSON ?? "{}"
+        )
+        let runtime = ExtensionOffscreenRuntime(
+            extensionID: record.id,
+            url: url,
+            schemeHandler: schemeHandler,
+            bridge: bridge,
+            nativeBridge: NativeBridge(),
+            shim: shim
+        )
+        offscreens[record.id] = runtime
+        AppLog.write("\(record.displayName): offscreen document \(documentPath)", tag: "ext")
+        respond([:])
+    }
+
+    private func stopOffscreenDocument(for identifier: String) {
+        offscreens[identifier]?.stop()
+        offscreens[identifier] = nil
     }
 
     // MARK: declarativeNetRequest
@@ -829,7 +873,7 @@ final class ExtensionManager: ObservableObject {
             app?.extensionEvaluateInTab(id: tabID, script: "window.__chromexDispatch && window.__chromexDispatch(\(requestID), \(JSBridge.literal(json)));", inContentWorld: true) { result in
                 let answered = (result as? String) == "__handled__"
                 if !answered, let pending = self.pendingReplies.removeValue(forKey: requestID) {
-                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
+                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context, runtimeID: pending.runtimeID)
                 }
             }
 
@@ -879,6 +923,19 @@ final class ExtensionManager: ObservableObject {
                     "\(JSBridge.literal(portId)));"
                 )
             }
+
+        case "offscreen.createDocument":
+            startOffscreenDocument(payload: payload, record: record, respond: respond)
+
+        case "offscreen.closeDocument":
+            stopOffscreenDocument(for: record.id)
+            respond([:])
+
+        case "offscreen.hasDocument":
+            respond(offscreens[record.id] != nil)
+
+        case "proxy.onRequest.registered":
+            AppLog.write("\(record.displayName): registered a proxy.onRequest listener", tag: "ext")
 
         case "cookies.get", "cookies.getAll", "cookies.set", "cookies.remove":
             handleCookieAPI(api: api, payload: payload, respond: respond)
@@ -950,7 +1007,7 @@ final class ExtensionManager: ObservableObject {
         case "runtime.response":
             let requestID = (payload["requestId"] as? NSNumber)?.intValue ?? (payload["requestId"] as? Int) ?? -1
             guard let pending = pendingReplies.removeValue(forKey: requestID) else { return }
-            reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: payload["value"], error: nil, context: pending.context)
+            reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: payload["value"], error: nil, context: pending.context, runtimeID: pending.runtimeID)
 
         case "runtime.getManifest":
             respond(record.manifestObject)
@@ -1378,6 +1435,25 @@ final class ExtensionManager: ObservableObject {
         context: String,
         to identifier: String
     ) {
+        if webView == nil, let offscreen = offscreens[identifier] {
+            let requestID = nextRequestID
+            nextRequestID += 1
+            pendingReplies[requestID] = PendingReply(
+                webView: nil,
+                frame: nil,
+                context: "background",
+                envelopeID: envelopeID,
+                runtimeID: identifier
+            )
+            offscreen.dispatch(JSBridge.stringify(message)) { [weak self] result in
+                guard let self else { return }
+                if result == "__none__", let pending = self.pendingReplies.removeValue(forKey: requestID) {
+                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context, runtimeID: pending.runtimeID)
+                }
+            }
+            return
+        }
+
         guard let webView else { return }
         guard let runtime = runtimes[identifier] else {
             reply(on: webView, frame: frame, id: envelopeID, value: nil, error: "This extension has no running background page.", context: context)
@@ -1393,7 +1469,7 @@ final class ExtensionManager: ObservableObject {
             guard let self else { return }
             if result == "__none__" {
                 if let pending = self.pendingReplies.removeValue(forKey: requestID) {
-                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context)
+                    self.reply(on: pending.webView, frame: pending.frame, id: pending.envelopeID, value: nil, error: nil, context: pending.context, runtimeID: pending.runtimeID)
                 }
             }
         }
@@ -1414,12 +1490,18 @@ final class ExtensionManager: ObservableObject {
         id: Int,
         value: Any?,
         error: String?,
-        context: String
+        context: String,
+        runtimeID: String? = nil
     ) {
-        guard let webView else { return }
         let json = JSBridge.stringify(value)
         let errorLiteral = error.map(JSBridge.literal) ?? "null"
         let script = "window.__chromexReply(\(id), \(JSBridge.literal(json)), \(errorLiteral));"
+
+        if webView == nil, let runtimeID, let runtime = runtimes[runtimeID] {
+            runtime.evaluate(script)
+            return
+        }
+        guard let webView else { return }
 
         if context == "content" {
             let world = app?.contentWorld ?? .page

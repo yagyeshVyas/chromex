@@ -792,16 +792,17 @@ enum ExtensionShim {
 
           chrome.offscreen = chrome.offscreen || {};
           chrome.offscreen.createDocument = function (options, callback) {
-            report("chrome.offscreen.createDocument: " + String((options && options.reasons || []).join(",")));
-            withCallback(Promise.resolve(), callback);
+            post("offscreen.createDocument", {
+              url: (options && options.url) || "offscreen.html",
+              reasons: (options && options.reasons) || []
+            }, function () { if (callback) { callback(); } });
           };
           chrome.offscreen.closeDocument = function (callback) {
-            withCallback(Promise.resolve(), callback);
+            post("offscreen.closeDocument", {}, function () { if (callback) { callback(); } });
           };
           chrome.offscreen.hasDocument = function (callback) {
-            withCallback(Promise.resolve(false), callback);
+            return withCallback(request("offscreen.hasDocument", {}), callback);
           };
-          chrome.offscreen.onRequest = makeEvent([]);
 
           chrome.proxy = chrome.proxy || {};
           chrome.proxy.settings = chrome.proxy.settings || {};
@@ -815,6 +816,20 @@ enum ExtensionShim {
             withCallback(Promise.resolve({ value: { mode: "direct" } }), callback);
           };
           chrome.proxy.settings.clear = function (details, callback) { if (callback) { callback(); } };
+          var proxyRequestListeners = [];
+          chrome.proxy.onRequest = {
+            addListener: function (listener) {
+              if (typeof listener === "function") {
+                proxyRequestListeners.push(listener);
+                post("proxy.onRequest.registered", {});
+              }
+            },
+            removeListener: function (listener) {
+              var index = proxyRequestListeners.indexOf(listener);
+              if (index >= 0) { proxyRequestListeners.splice(index, 1); }
+            },
+            hasListener: function (listener) { return proxyRequestListeners.indexOf(listener) >= 0; }
+          };
 
           chrome.system = chrome.system || {};
           chrome.system.cpu = chrome.system.cpu || {};

@@ -64,34 +64,35 @@ Detailed build steps, the optional CI lane, and how to change the bundle identif
 
 | Area | Status |
 |---|---|
-| Address/search with 6 built-in engines + custom | Working |
-| Tabs, tab groups, session restore | Working |
+| Chrome-style chrome: tab strip, omnibox row, bookmarks bar, three-dot menu | Working |
+| Omnibox with history suggestions and select-all-on-focus | Working |
+| Tabs, tab groups, session restore (lazy load) | Working |
 | Private browsing (non-persistent data store) | Working |
-| Downloads (to `Documents/Downloads`, Files-visible) | Working |
-| Bookmarks, history | Working |
-| Desktop mode per tab | Working |
-| Per-site camera/mic permission enforcement | Working |
+| Downloads: WebKit downloads, blob/data links, direct links, progress | Working |
+| File upload (`<input type="file">`) | Working |
+| Find in page, zoom, print, share | Working |
+| Desktop mode (desktop Chrome user agent) | Working |
+| Site permissions: camera, microphone, location, per-site prompts | Working |
+| Bookmarks, history, downloads pages | Working |
 | Ad/tracker blocking (`WKContentRuleList`) | Working |
-| Privacy dashboard | Working â€” reports compiled rules and real permissions, not invented counts |
 | Extension import: ZIP / folder / CRX3 | Working |
-| Extension compatibility analysis before install | Working |
-| Content scripts (JS + CSS, `run_at`, frames) | Working |
-| Extension popups | Working |
-| Extension options pages | Working — hosted in a sheet from the detail screen |
-| `chrome.i18n` (`_locales`, placeholders) | Working |
-| `chrome.permissions.contains/getAll` | Working |
-| `chrome.action.onClicked` (no popup) | Working — via **Trigger action** |
-| `storage.local`, runtime messaging, `tabs.query/create` | Working (documented subset) |
-| Extension background pages (non-persistent) | Working while the app runs |
-| `webRequest`, `declarativeNetRequest`, cookies, alarms | Not supported â€” see the matrix |
-| Reader mode | Not in this build |
-| Extension options pages | Not hosted in this build |
-| CRX signature verification | Not performed (no trust anchor) â€” labelled as such |
+| Install from Chrome Web Store (link or 32-character id, native CRX fetch) | Working |
+| Extension popups and options pages (full-height sheet, auto-fit viewport) | Working |
+| Content scripts (JS + CSS, `run_at`, frames, ISOLATED + MAIN world) | Working |
+| `chrome.runtime` messaging incl. long-lived ports | Working |
+| `chrome.storage` local/sync/session + `onChanged` | Working |
+| `chrome.tabs`, `chrome.scripting`, `chrome.alarms`, `chrome.action` | Working (subset) |
+| `chrome.i18n`, `chrome.permissions` | Working |
+| `chrome.cookies` (backed by `WKHTTPCookieStore`) | Working |
+| `chrome.notifications` (local notifications) | Working |
+| Extension `fetch`/XHR to granted hosts without CORS (native bridge) | Working |
+| `chrome.proxy` applied to the extension network bridge | Partial — page traffic stays on the app's network stack |
+| `declarativeNetRequest` block/allow rules compiled to content blockers | Partial — redirect/modifyHeaders not enforced |
+| `webRequest` observation or blocking | Not supported — WebKit exposes no request hook |
+| `identity`, `debugger`, `nativeMessaging`, `offscreen` documents | Not supported / stubbed |
 
 Nothing in the app is a placeholder presented as complete: unsupported capabilities are listed
 in the extension's verdict before install and in the compatibility document.
-
----
 
 ## Repository layout
 
@@ -153,11 +154,21 @@ interception primitive iOS provides.
 
 ## Known issues
 
-- Extension options pages are not hosted; CRX signatures are not verified.
-- `webRequest`, cookies, alarms and per-extension DNR are unsupported and reported before install.
-- Background execution stops when the app is suspended.
-- Content-script sources are cached at install; removing an extension clears its cache.
-- No screenshots have been captured.
+- iOS requires WebKit. There is no Blink, no V8, and no JIT entitlement for third-party
+  apps, so "the same engine as desktop Chrome" is not reachable on this platform.
+- `webRequest` blocking and observation cannot be provided: WebKit gives browsers no
+  per-request hook. Extensions that depend on it will only partially work.
+- `chrome.proxy` settings are honoured for extension background requests made through the
+  native bridge; page traffic still uses the app's network stack.
+- `declarativeNetRequest` block/allow rules work; redirect, modifyHeaders and priority
+  ordering are not enforced.
+- `chrome.identity`, `chrome.debugger`, `nativeMessaging` and real offscreen documents are
+  not implemented; calls are stubbed so extensions fail gracefully.
+- Background execution stops when iOS suspends the app; alarms only run while the app runs.
+- Extension pages are served over a custom scheme. Secure-context-only APIs that WebKit
+  withholds from custom schemes are shimmed (`crypto.subtle` SHA-256/HMAC,
+  `navigator.userAgentData`, `navigator.clipboard`).
+- Wide desktop popups are scaled to fit the phone viewport.
 
 ## Troubleshooting
 
