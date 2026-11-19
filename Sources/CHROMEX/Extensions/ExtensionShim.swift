@@ -207,6 +207,27 @@ enum ExtensionShim {
               return new Uint8Array(0);
             }
 
+            function hmacSha256(keyBytes, messageBytes) {
+              var key = keyBytes;
+              if (key.length > 64) { key = digest(key); }
+              var padded = new Uint8Array(64);
+              padded.set(key);
+              var inner = new Uint8Array(64 + messageBytes.length);
+              for (var i = 0; i < 64; i++) { inner[i] = padded[i] ^ 0x36; }
+              inner.set(messageBytes, 64);
+              var innerHash = digest(inner);
+              var outer = new Uint8Array(64 + 32);
+              for (var j = 0; j < 64; j++) { outer[j] = padded[j] ^ 0x5c; }
+              outer.set(innerHash, 64);
+              return digest(outer);
+            }
+
+            function unsupported(name) {
+              return function () {
+                return Promise.reject(new Error("chromex: crypto.subtle." + name + " is not implemented"));
+              };
+            }
+
             return {
               digest: function (algorithm, data) {
                 var name = typeof algorithm === "string" ? algorithm : (algorithm && algorithm.name);
@@ -218,7 +239,42 @@ enum ExtensionShim {
                   var result = digest(toBytes(data));
                   resolve(result.buffer);
                 });
-              }
+              },
+              importKey: function (format, keyData, algorithm) {
+                var name = typeof algorithm === "string" ? algorithm : (algorithm && algorithm.name);
+                return new Promise(function (resolve, reject) {
+                  if (String(name).toUpperCase() !== "HMAC") {
+                    reject(new Error("chromex: crypto.subtle.importKey supports HMAC only"));
+                    return;
+                  }
+                  resolve({ __chromexKey: true, bytes: toBytes(keyData), algorithm: algorithm });
+                });
+              },
+              sign: function (algorithm, key, data) {
+                return new Promise(function (resolve, reject) {
+                  if (!key || !key.__chromexKey) {
+                    reject(new Error("chromex: crypto.subtle.sign needs an imported HMAC key"));
+                    return;
+                  }
+                  var algorithmName = typeof algorithm === "string" ? algorithm : (algorithm && algorithm.name);
+                  if (String(algorithmName).toUpperCase() !== "HMAC") {
+                    reject(new Error("chromex: crypto.subtle.sign supports HMAC only"));
+                    return;
+                  }
+                  resolve(hmacSha256(key.bytes, toBytes(data)).buffer);
+                });
+              },
+              verify: function (algorithm, key, signature, data) {
+                return Promise.resolve(false);
+              },
+              generateKey: unsupported("generateKey"),
+              deriveKey: unsupported("deriveKey"),
+              deriveBits: unsupported("deriveBits"),
+              encrypt: unsupported("encrypt"),
+              decrypt: unsupported("decrypt"),
+              wrapKey: unsupported("wrapKey"),
+              unwrapKey: unsupported("unwrapKey"),
+              exportKey: unsupported("exportKey")
             };
           }
 
@@ -840,6 +896,147 @@ enum ExtensionShim {
             return "__handled__";
           };
 
+          // ---------------------------------------------------------------
+          // Desktop Chrome surfaces WebKit does not have
+          // ---------------------------------------------------------------
+
+          if (!navigator.userAgentData) {
+            var uaBrands = [
+              { brand: "Chromium", version: "131" },
+              { brand: "Google Chrome", version: "131" },
+              { brand: "Not_A Brand", version: "24" }
+            ];
+            var uaData = {
+              brands: uaBrands,
+              mobile: false,
+              platform: "Windows",
+              getHighEntropyValues: function () {
+                return Promise.resolve({
+                  brands: uaBrands,
+                  mobile: false,
+                  platform: "Windows",
+                  platformVersion: "10.0.0",
+                  architecture: "x86",
+                  bitness: "64",
+                  model: "",
+                  uaFullVersion: "131.0.0.0",
+                  fullVersionList: uaBrands,
+                  wow64: false
+                });
+              },
+              toJSON: function () { return { brands: uaBrands, mobile: false, platform: "Windows" }; }
+            };
+            try {
+              Object.defineProperty(navigator, "userAgentData", { value: uaData, configurable: true });
+            } catch (error) {}
+          }
+
+          chrome.extension = chrome.extension || {};
+          chrome.extension.getURL = chrome.runtime.getURL;
+          chrome.extension.getBackgroundPage = chrome.runtime.getBackgroundPage;
+          chrome.extension.isAllowedIncognitoAccess = function (callback) { if (callback) { callback(false); } };
+          chrome.extension.sendMessage = chrome.runtime.sendMessage;
+          chrome.extension.onMessage = chrome.runtime.onMessage;
+
+          chrome.windows = chrome.windows || {};
+          chrome.windows.WINDOW_ID_CURRENT = -2;
+          chrome.windows.getCurrent = function (callback) {
+            withCallback(chrome.tabs.query({ active: true }).then(function (tabs) {
+              return { id: 0, focused: true, type: "normal", tabs: tabs };
+            }), callback);
+          };
+          chrome.windows.getAll = function (options, callback) {
+            if (typeof options === "function") { callback = options; }
+            withCallback(chrome.tabs.query({}).then(function (tabs) {
+              return [{ id: 0, focused: true, type: "normal", tabs: tabs }];
+            }), callback);
+          };
+          chrome.windows.create = function (options, callback) {
+            var url = options && options.url;
+            if (url) {
+              chrome.tabs.create({ url: url, active: true }, function (tab) {
+                if (callback) { callback({ id: 0, type: "normal", tabs: [tab] }); }
+              });
+            } else if (callback) {
+              callback({ id: 0, type: "normal", tabs: [] });
+            }
+          };
+          chrome.windows.remove = function (id, callback) { if (callback) { callback(); } };
+          chrome.windows.update = function (id, info, callback) { if (callback) { callback({ id: id || 0 }); } };
+          chrome.windows.onRemoved = makeEvent([]);
+          chrome.windows.onFocusChanged = makeEvent([]);
+          chrome.windows.onCreated = makeEvent([]);
+
+          chrome.runtime.connect = function (extensionId, connectInfo) {
+            var listeners = [];
+            var disconnectListeners = [];
+            var port = {
+              name: (connectInfo && connectInfo.name) || "",
+              sender: { id: EXT_ID, url: location.href },
+              onMessage: makeEvent(listeners),
+              onDisconnect: makeEvent(disconnectListeners),
+              postMessage: function (message) {
+                post("runtime.connect.postMessage", { message: message });
+              },
+              disconnect: function () {
+                disconnectListeners.slice().forEach(function (listener) {
+                  try { listener(); } catch (error) {}
+                });
+              }
+            };
+            return port;
+          };
+          chrome.runtime.onConnect = makeEvent([]);
+
+          var noopApis = {
+            management: { getAll: [], getSelf: {}, launchApp: undefined },
+            idle: { queryState: "active" },
+            power: {},
+            sessions: { getRecentlyClosed: [], restore: {} },
+            tts: { getVoices: [] },
+            fontSettings: { getFontList: [] },
+            topSites: { get: [] },
+            search: { query: [] },
+            certificates: {}
+          };
+          Object.keys(noopApis).forEach(function (name) {
+            var namespace = chrome[name] || {};
+            Object.keys(noopApis[name]).forEach(function (method) {
+              if (!namespace[method]) {
+                namespace[method] = function () {
+                  var args = Array.prototype.slice.call(arguments);
+                  var callback = args.filter(function (arg) { return typeof arg === "function"; })[0];
+                  var value = noopApis[name][method];
+                  if (callback) { callback(typeof value === "object" ? value : undefined); }
+                  return Promise.resolve(value);
+                };
+              }
+            });
+            if (!namespace.onChanged) { namespace.onChanged = makeEvent([]); }
+            chrome[name] = namespace;
+          });
+
+          // Any chrome.* member an extension still reaches for is reported by
+          // name, so a missing surface shows up in diagnostics instead of as an
+          // opaque TypeError inside obfuscated code.
+          function observedChromeNamespace(target) {
+            if (!target || typeof target !== "object") { return target; }
+            return new Proxy(target, {
+              get: function (object, property) {
+                if (property in object) { return object[property]; }
+                if (typeof property === "symbol") { return undefined; }
+                report("chrome." + String(property) + " is not implemented");
+                return undefined;
+              }
+            });
+          }
+          Object.keys(chrome).forEach(function (name) {
+            if (chrome[name] && typeof chrome[name] === "object") {
+              chrome[name] = observedChromeNamespace(chrome[name]);
+            }
+          });
+          window.chrome = observedChromeNamespace(chrome);
+
           if (CONTEXT !== "content") {
             window.addEventListener("error", function (event) {
               var target = event.target;
@@ -849,7 +1046,7 @@ enum ExtensionShim {
               report((event.message || "script error") + " @ " + (event.filename || where || "") + ":" + (event.lineno || 0));
             }, true);
             window.addEventListener("unhandledrejection", function (event) {
-              report("unhandled rejection: " + String(event.reason));
+              report("unhandled rejection: " + String(event.reason && event.reason.stack ? event.reason.stack : event.reason));
             });
             var originalError = console.error;
             console.error = function () {
